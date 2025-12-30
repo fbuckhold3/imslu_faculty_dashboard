@@ -1,0 +1,25 @@
+# R specific
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Shiny specific
+rsconnect/
+
+# Sensitive data - CRITICAL
+.env
+.Renviron
+config.yml
+*_token.txt
+*_api_key.txt
+
+# Data files (don't commit REDCap downloads)
+data/
+*.rds
+*.csv
+
+# OS specific
+.DS_Store
+Thumbs.db
