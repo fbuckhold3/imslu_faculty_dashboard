@@ -5,10 +5,11 @@ library(DT)
 library(plotly)
 
 source("R/utils/data_processing.R")
+source("R/utils/calculations.R")
+source("R/utils/plot_functions.R")
 
-# Load cached test data (faster during development)
-cat("Loading data...\n")
-test_data <- load_test_data()
-faculty_redcap_data <- test_data$faculty
-rdm_redcap_data <- test_data$rdm
-cat("✓ Data loaded!\n")
+# Load data from REDCap APIs
+cat("Loading data from REDCap...\n")
+faculty_redcap_data <- download_faculty_data()
+rdm_redcap_data <- download_rdm_focused()
+cat("✓ Data loaded successfully!\n")
