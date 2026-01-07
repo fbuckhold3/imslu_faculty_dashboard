@@ -23,10 +23,10 @@ EVAL_DOMAINS <- c(
 #' Filter evaluations by academic year
 #'
 #' @param data Data frame with date column
-#' @param date_col Name of date column (default: "eval_date")
+#' @param date_col Name of date column (default: "fac_eval_date")
 #' @param year Academic year ("current", "all", or specific like "2024-2025")
 #' @return Filtered data frame
-filter_by_academic_year <- function(data, date_col = "eval_date", year = "current") {
+filter_by_academic_year <- function(data, date_col = "fac_eval_date", year = "current") {
   if (year == "all") {
     return(data)
   }
@@ -53,7 +53,7 @@ filter_by_academic_year <- function(data, date_col = "eval_date", year = "curren
 #' @param date_col Name of date column
 #' @param delay_months Number of months to delay (default: 6)
 #' @return Filtered data frame
-apply_time_delay <- function(data, date_col = "eval_date", delay_months = EVALUATION_DELAY_MONTHS) {
+apply_time_delay <- function(data, date_col = "fac_eval_date", delay_months = EVALUATION_DELAY_MONTHS) {
   cutoff_date <- Sys.Date() - months(delay_months)
 
   data %>%
@@ -159,13 +159,13 @@ get_faculty_feedback <- function(eval_data, faculty_name) {
   list(
     plus = faculty_evals %>%
       filter(!is.na(plus), plus != "") %>%
-      select(eval_date, plus) %>%
-      arrange(desc(eval_date)),
+      select(fac_eval_date, plus) %>%
+      arrange(desc(fac_eval_date)),
 
     delta = faculty_evals %>%
       filter(!is.na(delta), delta != "") %>%
-      select(eval_date, delta) %>%
-      arrange(desc(eval_date))
+      select(fac_eval_date, delta) %>%
+      arrange(desc(fac_eval_date))
   )
 }
 

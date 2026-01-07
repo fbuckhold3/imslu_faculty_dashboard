@@ -17,6 +17,11 @@ mod_faculty_eval_ui <- function(id) {
           collapsible = TRUE,
 
           fluidRow(
+            # Faculty selector (for admins and med ed leaders)
+            column(
+              width = 4,
+              uiOutput(ns("faculty_selector_ui"))
+            ),
             column(
               width = 4,
               radioButtons(
@@ -30,7 +35,7 @@ mod_faculty_eval_ui <- function(id) {
               )
             ),
             column(
-              width = 8,
+              width = 4,
               uiOutput(ns("filter_info"))
             )
           )
@@ -116,25 +121,80 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # Reactive: filtered evaluation data
-    filtered_evals <- reactive({
+    # Show faculty selector for admins and med ed leaders
+    output$faculty_selector_ui <- renderUI({
       req(faculty_info())
 
-      # Get faculty name
-      fac_name <- faculty_info()$fac_name
+      access_level <- faculty_info()$access_level
 
-      # Filter evaluations for this faculty
-      evals <- rdm_data$faculty_evaluation %>%
-        filter(fac_fell_name == fac_name)
+      if (access_level == "individual") {
+        # Regular faculty - no selector needed
+        return(NULL)
+      }
+
+      # Admin or med ed leader - show selector
+      accessible_faculty <- faculty_info()$accessible_faculty
+
+      selectInput(
+        ns("selected_faculty"),
+        "View Faculty:",
+        choices = c(
+          "Faculty Dashboard (Summary)" = "__dashboard__",
+          setNames(accessible_faculty, accessible_faculty)
+        ),
+        selected = "__dashboard__"
+      )
+    })
+
+    # Determine which faculty to show
+    display_faculty <- reactive({
+      req(faculty_info())
+
+      access_level <- faculty_info()$access_level
+
+      if (access_level == "individual") {
+        # Regular faculty - show their own data
+        return(faculty_info()$fac_name)
+      }
+
+      # Admin or med ed leader
+      req(input$selected_faculty)
+
+      if (input$selected_faculty == "__dashboard__") {
+        # Show aggregate dashboard
+        return("__dashboard__")
+      } else {
+        # Show selected individual faculty
+        return(input$selected_faculty)
+      }
+    })
+
+    # Reactive: filtered evaluation data
+    filtered_evals <- reactive({
+      req(faculty_info(), display_faculty())
+
+      faculty_to_show <- display_faculty()
+
+      # Get base evaluations
+      if (faculty_to_show == "__dashboard__") {
+        # Dashboard mode - show all accessible faculty
+        accessible_names <- faculty_info()$accessible_faculty
+        evals <- rdm_data$faculty_evaluation %>%
+          filter(fac_fell_name %in% accessible_names)
+      } else {
+        # Individual mode - show selected faculty
+        evals <- rdm_data$faculty_evaluation %>%
+          filter(fac_fell_name == faculty_to_show)
+      }
 
       # Apply time delay (6 months)
-      if ("eval_date" %in% names(evals)) {
-        evals <- apply_time_delay(evals, "eval_date")
+      if ("fac_eval_date" %in% names(evals)) {
+        evals <- apply_time_delay(evals, "fac_eval_date")
       }
 
       # Apply academic year filter
-      if (input$time_filter == "current" && "eval_date" %in% names(evals)) {
-        evals <- filter_by_academic_year(evals, "eval_date", "current")
+      if (input$time_filter == "current" && "fac_eval_date" %in% names(evals)) {
+        evals <- filter_by_academic_year(evals, "fac_eval_date", "current")
       }
 
       evals
@@ -145,13 +205,13 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
       evals <- rdm_data$faculty_evaluation
 
       # Apply time delay
-      if ("eval_date" %in% names(evals)) {
-        evals <- apply_time_delay(evals, "eval_date")
+      if ("fac_eval_date" %in% names(evals)) {
+        evals <- apply_time_delay(evals, "fac_eval_date")
       }
 
       # Apply academic year filter
-      if (input$time_filter == "current" && "eval_date" %in% names(evals)) {
-        evals <- filter_by_academic_year(evals, "eval_date", "current")
+      if (input$time_filter == "current" && "fac_eval_date" %in% names(evals)) {
+        evals <- filter_by_academic_year(evals, "fac_eval_date", "current")
       }
 
       evals
@@ -165,7 +225,16 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
     # Reactive: calculate means
     individual_means <- reactive({
       req(meets_threshold())
-      calculate_faculty_eval_means(filtered_evals())
+
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show == "__dashboard__") {
+        # Dashboard mode - calculate aggregate for accessible faculty
+        calculate_faculty_eval_means(filtered_evals(), faculty_name = NULL)
+      } else {
+        # Individual mode - calculate for specific faculty
+        calculate_faculty_eval_means(filtered_evals(), faculty_name = faculty_to_show)
+      }
     })
 
     all_means <- reactive({
@@ -265,7 +334,21 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
             )
           )
       } else {
-        create_spider_plot(individual_means(), all_means())
+        faculty_to_show <- display_faculty()
+
+        # Determine label
+        if (faculty_to_show == "__dashboard__") {
+          access_level <- faculty_info()$access_level
+          label <- if (access_level == "meded_admin") {
+            "All Faculty Average"
+          } else {
+            "Division Average"
+          }
+        } else {
+          label <- "Your Scores"
+        }
+
+        create_spider_plot(individual_means(), all_means(), individual_label = label)
       }
     })
 
@@ -281,7 +364,21 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
             )
           )
       } else {
-        create_comparison_bar_chart(comparison_data())
+        faculty_to_show <- display_faculty()
+
+        # Determine label
+        if (faculty_to_show == "__dashboard__") {
+          access_level <- faculty_info()$access_level
+          label <- if (access_level == "meded_admin") {
+            "All Faculty"
+          } else {
+            "Division"
+          }
+        } else {
+          label <- "Your Score"
+        }
+
+        create_comparison_bar_chart(comparison_data(), individual_label = label)
       }
     })
 
@@ -300,14 +397,36 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
 
     # Plus feedback table
     output$plus_table <- DT::renderDataTable({
-      feedback <- get_faculty_feedback(filtered_evals(), faculty_info()$fac_name)
-      create_feedback_table(feedback$plus, "plus")
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show == "__dashboard__") {
+        # Dashboard mode - don't show individual feedback
+        datatable(
+          data.frame(Message = "Select an individual faculty member to view feedback"),
+          options = list(dom = 't'),
+          rownames = FALSE
+        )
+      } else {
+        feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
+        create_feedback_table(feedback$plus, "plus")
+      }
     })
 
     # Delta feedback table
     output$delta_table <- DT::renderDataTable({
-      feedback <- get_faculty_feedback(filtered_evals(), faculty_info()$fac_name)
-      create_feedback_table(feedback$delta, "delta")
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show == "__dashboard__") {
+        # Dashboard mode - don't show individual feedback
+        datatable(
+          data.frame(Message = "Select an individual faculty member to view feedback"),
+          options = list(dom = 't'),
+          rownames = FALSE
+        )
+      } else {
+        feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
+        create_feedback_table(feedback$delta, "delta")
+      }
     })
   })
 }

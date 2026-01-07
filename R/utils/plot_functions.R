@@ -10,8 +10,9 @@ library(tidyverse)
 #'
 #' @param individual_means Mean scores for individual faculty
 #' @param all_means Mean scores for all faculty
+#' @param individual_label Label for individual/group (default: "Your Scores")
 #' @return Plotly radar chart object
-create_spider_plot <- function(individual_means, all_means) {
+create_spider_plot <- function(individual_means, all_means, individual_label = "Your Scores") {
   # Combine data and add labels
   plot_data <- individual_means %>%
     select(domain, individual_score = mean_score) %>%
@@ -43,7 +44,7 @@ create_spider_plot <- function(individual_means, all_means) {
     add_trace(
       r = plot_data$individual_score,
       theta = plot_data$domain_label,
-      name = 'Your Scores',
+      name = individual_label,
       fillcolor = 'rgba(67, 133, 245, 0.3)',
       line = list(color = 'rgba(67, 133, 245, 1)')
     )
@@ -70,8 +71,9 @@ create_spider_plot <- function(individual_means, all_means) {
 #' Create bar chart comparing scores
 #'
 #' @param comparison_data Data frame with individual and all faculty scores
+#' @param individual_label Label for individual/group (default: "Your Score")
 #' @return Plotly bar chart object
-create_comparison_bar_chart <- function(comparison_data) {
+create_comparison_bar_chart <- function(comparison_data, individual_label = "Your Score") {
   # Add labels
   plot_data <- comparison_data %>%
     mutate(domain_label = sapply(domain, get_domain_label))
@@ -93,7 +95,7 @@ create_comparison_bar_chart <- function(comparison_data) {
     add_trace(
       x = ~domain_label,
       y = ~individual_score,
-      name = 'Your Score',
+      name = individual_label,
       type = 'bar',
       marker = list(color = 'rgba(67, 133, 245, 0.8)')
     )
@@ -178,7 +180,7 @@ create_feedback_table <- function(feedback_data, feedback_type = "plus") {
 
   table_data <- feedback_data %>%
     mutate(
-      Date = as.character(eval_date),
+      Date = as.character(fac_eval_date),
       Feedback = .data[[text_col]]
     ) %>%
     select(Date, Feedback)
