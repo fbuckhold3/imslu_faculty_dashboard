@@ -135,14 +135,27 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
       # Admin or med ed leader - show selector
       accessible_faculty <- faculty_info()$accessible_faculty
 
-      selectInput(
-        ns("selected_faculty"),
-        "View Faculty:",
-        choices = c(
-          "Faculty Dashboard (Summary)" = "__dashboard__",
-          setNames(accessible_faculty, accessible_faculty)
+      # Create helpful label
+      view_label <- if (access_level == "meded_admin") {
+        "View: All Faculty or Individual"
+      } else {
+        "View: Division or Individual"
+      }
+
+      tagList(
+        selectInput(
+          ns("selected_faculty"),
+          view_label,
+          choices = c(
+            "Aggregate Dashboard (Summary)" = "__dashboard__",
+            setNames(accessible_faculty, accessible_faculty)
+          ),
+          selected = "__dashboard__"
         ),
-        selected = "__dashboard__"
+        tags$small(
+          class = "text-muted",
+          "Aggregate shows summary statistics. Select individual faculty to see their comments and detailed evaluation data."
+        )
       )
     })
 
@@ -159,6 +172,11 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
 
       # Admin or med ed leader
       req(input$selected_faculty)
+
+      # Validate selection
+      if (is.null(input$selected_faculty) || input$selected_faculty == "") {
+        return("__dashboard__")  # Default to dashboard if invalid selection
+      }
 
       if (input$selected_faculty == "__dashboard__") {
         # Show aggregate dashboard
@@ -200,21 +218,11 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
       evals
     })
 
-    # Reactive: all faculty evaluations (for comparison)
+    # Reactive: all faculty evaluations (for comparison - ENTIRE dataset, no filters)
     all_evals <- reactive({
-      evals <- rdm_data$faculty_evaluation
-
-      # Apply time delay
-      if ("fac_eval_date" %in% names(evals)) {
-        evals <- apply_time_delay(evals, "fac_eval_date")
-      }
-
-      # Apply academic year filter
-      if (input$time_filter == "current" && "fac_eval_date" %in% names(evals)) {
-        evals <- filter_by_academic_year(evals, "fac_eval_date", "current")
-      }
-
-      evals
+      # Return complete dataset for comparison means
+      # No time delay, no academic year filter
+      rdm_data$faculty_evaluation
     })
 
     # Reactive: check if minimum threshold met
@@ -248,26 +256,49 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
 
     # Filter info output
     output$filter_info <- renderUI({
+      req(faculty_info())
+
       n_evals <- nrow(filtered_evals())
       current_year <- get_current_academic_year()
+      faculty_to_show <- display_faculty()
+
+      # Determine what's being shown
+      view_description <- if (faculty_to_show == "__dashboard__") {
+        access_level <- faculty_info()$access_level
+        if (access_level == "meded_admin") {
+          "All Faculty (Aggregate)"
+        } else {
+          "Division (Aggregate)"
+        }
+      } else {
+        paste0("Individual: ", faculty_to_show)
+      }
 
       if (!meets_threshold()) {
         tags$div(
           class = "alert alert-warning",
           icon("exclamation-triangle"),
+          tags$strong(view_description), tags$br(),
           sprintf(
-            " Fewer than %d evaluations available for this period. Data not shown to protect privacy.",
+            "Fewer than %d evaluations available for this period. Data not shown to protect privacy.",
             MIN_EVALUATIONS
           )
         )
       } else {
+        time_info <- if (input$time_filter == "current") {
+          paste0(" (Current year: ", current_year, ")")
+        } else {
+          " (All time)"
+        }
+
         tags$div(
           class = "alert alert-info",
           icon("info-circle"),
+          tags$strong(view_description), tags$br(),
           sprintf(
-            " Showing %d evaluations (6-month delay applied for privacy).%s",
+            "Showing %d evaluations%s. Includes data without dates. Comparison to entire dataset baseline.",
             n_evals,
-            if (input$time_filter == "current") paste0(" Current year: ", current_year) else ""
+            time_info
           )
         )
       }

@@ -42,9 +42,9 @@ filter_by_academic_year <- function(data, date_col = "fac_eval_date", year = "cu
       mutate(academic_year = assign_academic_year(.data[[date_col]]))
   }
 
-  # Filter
+  # Filter - include records with NA academic year (missing dates) OR matching year
   data %>%
-    filter(academic_year == year)
+    filter(is.na(academic_year) | academic_year == year)
 }
 
 #' Apply time delay filter to protect faculty privacy
@@ -54,10 +54,16 @@ filter_by_academic_year <- function(data, date_col = "fac_eval_date", year = "cu
 #' @param delay_months Number of months to delay (default: 6)
 #' @return Filtered data frame
 apply_time_delay <- function(data, date_col = "fac_eval_date", delay_months = EVALUATION_DELAY_MONTHS) {
+  # If date column doesn't exist, return all data
+  if (!date_col %in% names(data)) {
+    return(data)
+  }
+
   cutoff_date <- Sys.Date() - months(delay_months)
 
+  # Include records where date is before cutoff OR date is NA (missing dates included)
   data %>%
-    filter(.data[[date_col]] <= cutoff_date | is.na(.data[[date_col]]))
+    filter(is.na(.data[[date_col]]) | .data[[date_col]] <= cutoff_date)
 }
 
 #' Check if data meets minimum threshold
