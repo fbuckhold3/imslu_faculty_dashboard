@@ -285,10 +285,12 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
           )
         )
       } else {
-        time_info <- if (input$time_filter == "current") {
-          paste0(" (Current year: ", current_year, ")")
+        if (input$time_filter == "current") {
+          time_info <- paste0(" (Current year: ", current_year, ", 6-month delay applied)")
+          note <- "Comparison to entire dataset baseline."
         } else {
-          " (All time)"
+          time_info <- " (All time, 6-month delay applied)"
+          note <- "Includes evaluations without dates. Comparison to entire dataset baseline."
         }
 
         tags$div(
@@ -296,9 +298,10 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
           icon("info-circle"),
           tags$strong(view_description), tags$br(),
           sprintf(
-            "Showing %d evaluations%s. Includes data without dates. Comparison to entire dataset baseline.",
+            "Showing %d evaluations%s. %s",
             n_evals,
-            time_info
+            time_info,
+            note
           )
         )
       }

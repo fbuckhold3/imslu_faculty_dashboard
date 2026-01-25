@@ -28,6 +28,7 @@ EVAL_DOMAINS <- c(
 #' @return Filtered data frame
 filter_by_academic_year <- function(data, date_col = "fac_eval_date", year = "current") {
   if (year == "all") {
+    # All time - include everything (even records without dates)
     return(data)
   }
 
@@ -42,9 +43,10 @@ filter_by_academic_year <- function(data, date_col = "fac_eval_date", year = "cu
       mutate(academic_year = assign_academic_year(.data[[date_col]]))
   }
 
-  # Filter - include records with NA academic year (missing dates) OR matching year
+  # Filter for specific year - EXCLUDE records with NA dates
+  # Records without dates can't be assigned to current year
   data %>%
-    filter(is.na(academic_year) | academic_year == year)
+    filter(!is.na(academic_year) & academic_year == year)
 }
 
 #' Apply time delay filter to protect faculty privacy
