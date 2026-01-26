@@ -122,14 +122,20 @@ assign_academic_year <- function(date_vector) {
   # Assign academic year based on date
   # July-June year definition
   # Return academic year labels (e.g., "2024-2025")
-  
-  if (is.character(date_vector)) {
-    date_vector <- as.Date(date_vector)
+
+  # Handle different date formats
+  if (is.numeric(date_vector)) {
+    # REDCap stores dates as numeric YYYYM format (e.g., 20251 = 2025 January)
+    year_val <- floor(date_vector / 100)
+    month_val <- date_vector %% 100
+  } else {
+    if (is.character(date_vector)) {
+      date_vector <- as.Date(date_vector)
+    }
+    year_val <- lubridate::year(date_vector)
+    month_val <- lubridate::month(date_vector)
   }
-  
-  year_val <- lubridate::year(date_vector)
-  month_val <- lubridate::month(date_vector)
-  
+
   # If July or later, academic year starts this year
   # Otherwise, academic year started last year
   ifelse(

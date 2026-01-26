@@ -205,10 +205,11 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
           filter(fac_fell_name == faculty_to_show)
       }
 
-      # Apply time delay (6 months)
-      if ("fac_eval_date" %in% names(evals)) {
-        evals <- apply_time_delay(evals, "fac_eval_date")
-      }
+      # Apply time delay (6 months) - REMOVED for now
+      # Privacy delay not needed when viewing own data or aggregate dashboards
+      # if ("fac_eval_date" %in% names(evals)) {
+      #   evals <- apply_time_delay(evals, "fac_eval_date")
+      # }
 
       # Apply academic year filter
       if (input$time_filter == "current" && "fac_eval_date" %in% names(evals)) {
@@ -286,10 +287,10 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
         )
       } else {
         if (input$time_filter == "current") {
-          time_info <- paste0(" (Current year: ", current_year, ", 6-month delay applied)")
+          time_info <- paste0(" (Current year: ", current_year, ")")
           note <- "Comparison to entire dataset baseline."
         } else {
-          time_info <- " (All time, 6-month delay applied)"
+          time_info <- " (All time)"
           note <- "Includes evaluations without dates. Comparison to entire dataset baseline."
         }
 

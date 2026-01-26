@@ -61,11 +61,31 @@ apply_time_delay <- function(data, date_col = "fac_eval_date", delay_months = EV
     return(data)
   }
 
-  cutoff_date <- Sys.Date() - months(delay_months)
+  # Handle numeric YYYYM format from REDCap
+  dates <- data[[date_col]]
 
-  # Include records where date is before cutoff OR date is NA (missing dates included)
-  data %>%
-    filter(is.na(.data[[date_col]]) | .data[[date_col]] <= cutoff_date)
+  if (is.numeric(dates)) {
+    # Convert YYYYM to comparable format
+    # Current date in YYYYM format
+    current_year <- as.numeric(format(Sys.Date(), "%Y"))
+    current_month <- as.numeric(format(Sys.Date(), "%m"))
+    current_yyyym <- current_year * 100 + current_month
+
+    # Calculate cutoff (6 months ago)
+    cutoff_date <- Sys.Date() - months(delay_months)
+    cutoff_year <- as.numeric(format(cutoff_date, "%Y"))
+    cutoff_month <- as.numeric(format(cutoff_date, "%m"))
+    cutoff_yyyym <- cutoff_year * 100 + cutoff_month
+
+    # Include records where date is before cutoff OR date is NA
+    data %>%
+      filter(is.na(.data[[date_col]]) | .data[[date_col]] <= cutoff_yyyym)
+  } else {
+    # Standard date format
+    cutoff_date <- Sys.Date() - months(delay_months)
+    data %>%
+      filter(is.na(.data[[date_col]]) | .data[[date_col]] <= cutoff_date)
+  }
 }
 
 #' Check if data meets minimum threshold

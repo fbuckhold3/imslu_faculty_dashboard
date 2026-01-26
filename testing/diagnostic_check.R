@@ -60,10 +60,26 @@ if (nrow(fred) > 0) {
     filter(fac_fell_name == fred_name)
   cat("   Exact match (", fred_name, "):", nrow(fred_evals_exact), "\n")
 
-  # Try partial match
-  fred_evals_partial <- eval_data %>%
+  # Try partial match - buckhold
+  fred_evals_buckhold <- eval_data %>%
     filter(str_detect(tolower(fac_fell_name), "buckhold"))
-  cat("   Partial match (contains 'buckhold'):", nrow(fred_evals_partial), "\n")
+  cat("   Partial match (contains 'buckhold'):", nrow(fred_evals_buckhold), "\n")
+
+  # Try partial match - fred
+  fred_evals_fred <- eval_data %>%
+    filter(!is.na(fac_fell_name), str_detect(tolower(fac_fell_name), "fred"))
+  cat("   Partial match (contains 'fred'):", nrow(fred_evals_fred), "\n")
+
+  # Try first and last name from faculty record
+  if ("fac_f_name" %in% names(fred) && "fac_l_name" %in% names(fred)) {
+    if (!is.na(fred$fac_l_name)) {
+      fred_evals_lastname <- eval_data %>%
+        filter(!is.na(fac_fell_name), str_detect(tolower(fac_fell_name), tolower(fred$fac_l_name)))
+      cat("   Partial match (last name '", fred$fac_l_name, "'):", nrow(fred_evals_lastname), "\n")
+    }
+  }
+
+  fred_evals_partial <- fred_evals_buckhold
 
   if (nrow(fred_evals_partial) > 0) {
     cat("\n   Name variations found:\n")
