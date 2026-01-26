@@ -2,7 +2,7 @@
 # Handles faculty authentication and determines access level:
 # - Individual: Regular faculty see only their own data
 # - Division Admin: Faculty with fac_admin == "Yes" see their division
-# - Med Ed Leader: Faculty with fac_meded_lead == "Yes" see all faculty
+# - Department Leader: Faculty with dep_lead == "Yes" see all faculty/divisions
 
 mod_login_ui <- function(id) {
   ns <- NS(id)
@@ -133,20 +133,25 @@ mod_login_server <- function(id, faculty_data) {
       # Determine access level
       access_level <- "individual"
       accessible_divisions <- NULL
+      all_divisions <- NULL
 
-      # Check if Med Ed Leader (highest privilege)
-      if (!is.na(faculty_record$fac_meded_lead) &&
-          faculty_record$fac_meded_lead == "Yes") {
-        access_level <- "meded_admin"
-      } else if (!is.na(faculty_record$fac_admin) &&
-                 faculty_record$fac_admin == "Yes") {
-        # Division admin
+      # Check if Department Leader (highest privilege)
+      if (!is.na(faculty_record$dep_lead) && faculty_record$dep_lead == "Yes") {
+        access_level <- "department_leader"
+        # Get all unique divisions for selector
+        all_divisions <- faculty_data %>%
+          filter(archived == 0, !is.na(fac_div)) %>%
+          pull(fac_div) %>%
+          unique() %>%
+          sort()
+      } else if (!is.na(faculty_record$fac_admin) && faculty_record$fac_admin == "Yes") {
+        # Division admin - can see their specific division
         access_level <- "division_admin"
         accessible_divisions <- faculty_record$fac_div
       }
 
       # Get list of faculty names this user can access
-      if (access_level == "meded_admin") {
+      if (access_level == "department_leader") {
         accessible_faculty <- faculty_data %>%
           filter(archived == 0) %>%
           pull(fac_name)
@@ -166,7 +171,8 @@ mod_login_server <- function(id, faculty_data) {
         fac_div = faculty_record$fac_div,
         access_level = access_level,
         accessible_faculty = accessible_faculty,
-        accessible_divisions = accessible_divisions
+        accessible_divisions = accessible_divisions,
+        all_divisions = all_divisions
       )
 
       faculty_info(info)
@@ -176,7 +182,7 @@ mod_login_server <- function(id, faculty_data) {
         access_level,
         "individual" = "Individual Dashboard",
         "division_admin" = paste0("Division Leader Dashboard (", accessible_divisions, ")"),
-        "meded_admin" = "Medical Education Leader Dashboard (All Faculty)"
+        "department_leader" = "Department Leader Dashboard (All Faculty & Divisions)"
       )
 
       output$login_message <- renderUI({

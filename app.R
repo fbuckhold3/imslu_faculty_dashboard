@@ -58,7 +58,7 @@ server <- function(input, output, session) {
   faculty_info <- mod_login_server("login", faculty_redcap_data)
 
   # Faculty evaluation module
-  mod_faculty_eval_server("faculty_eval", faculty_info, rdm_redcap_data)
+  mod_faculty_eval_server("faculty_eval", faculty_info, rdm_redcap_data, faculty_redcap_data)
 
   # Hide tabs until logged in
   observe({

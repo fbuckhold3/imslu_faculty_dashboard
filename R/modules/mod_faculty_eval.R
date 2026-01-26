@@ -17,13 +17,18 @@ mod_faculty_eval_ui <- function(id) {
           collapsible = TRUE,
 
           fluidRow(
-            # Faculty selector (for admins and med ed leaders)
+            # Division selector (for department leaders only)
             column(
-              width = 4,
+              width = 3,
+              uiOutput(ns("division_selector_ui"))
+            ),
+            # Faculty selector (for admins and leaders)
+            column(
+              width = 3,
               uiOutput(ns("faculty_selector_ui"))
             ),
             column(
-              width = 4,
+              width = 3,
               radioButtons(
                 ns("time_filter"),
                 "Time Period:",
@@ -35,7 +40,7 @@ mod_faculty_eval_ui <- function(id) {
               )
             ),
             column(
-              width = 4,
+              width = 3,
               uiOutput(ns("filter_info"))
             )
           )
@@ -117,11 +122,35 @@ mod_faculty_eval_ui <- function(id) {
   )
 }
 
-mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
+mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # Show faculty selector for admins and med ed leaders
+    # Show division selector for department leaders
+    output$division_selector_ui <- renderUI({
+      req(faculty_info())
+
+      access_level <- faculty_info()$access_level
+
+      if (access_level != "department_leader") {
+        # Only department leaders see division selector
+        return(NULL)
+      }
+
+      all_divisions <- faculty_info()$all_divisions
+
+      selectInput(
+        ns("selected_division"),
+        "Select Division:",
+        choices = c(
+          "All Divisions" = "__all__",
+          setNames(all_divisions, all_divisions)
+        ),
+        selected = "__all__"
+      )
+    })
+
+    # Show faculty selector for admins and leaders
     output$faculty_selector_ui <- renderUI({
       req(faculty_info())
 
@@ -132,14 +161,29 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data) {
         return(NULL)
       }
 
-      # Admin or med ed leader - show selector
-      accessible_faculty <- faculty_info()$accessible_faculty
+      # Get accessible faculty, filtered by division if department leader
+      if (access_level == "department_leader") {
+        req(input$selected_division)
 
-      # Create helpful label
-      view_label <- if (access_level == "meded_admin") {
-        "View: All Faculty or Individual"
+        if (input$selected_division == "__all__") {
+          # Show all active faculty
+          accessible_faculty <- faculty_data %>%
+            filter(archived == 0) %>%
+            arrange(fac_name) %>%
+            pull(fac_name)
+        } else {
+          # Filter to selected division
+          accessible_faculty <- faculty_data %>%
+            filter(archived == 0, fac_div == input$selected_division) %>%
+            arrange(fac_name) %>%
+            pull(fac_name)
+        }
+
+        view_label <- "View: Division or Individual"
       } else {
-        "View: Division or Individual"
+        # Division admin - show their division
+        accessible_faculty <- faculty_info()$accessible_faculty
+        view_label <- "View: Division or Individual"
       }
 
       tagList(
