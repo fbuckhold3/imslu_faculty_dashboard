@@ -30,25 +30,31 @@ download_rdm_focused <- function() {
   cat("✓ Downloaded", nrow(all_data), "total records\n")
   cat("Separating forms by completion fields...\n")
 
-  # Separate by form completion fields
-  # Each form has its own _complete field
+  # Separate by form completion fields AND repeating instrument field
+  # For repeating instruments, check redcap_repeat_instrument column
+
   resident_data <- all_data %>%
-    filter(!is.na(resident_data_complete))
+    filter(is.na(redcap_repeat_instrument) & !is.na(resident_data_complete))
 
   assessment <- all_data %>%
-    filter(!is.na(assessment_complete))
+    filter((redcap_repeat_instrument == "assessment" | is.na(redcap_repeat_instrument)) &
+           !is.na(assessment_complete))
 
   faculty_eval <- all_data %>%
-    filter(!is.na(faculty_evaluation_complete))
+    filter((redcap_repeat_instrument == "faculty_evaluation" |
+            (!is.na(faculty_evaluation_complete) & is.na(redcap_repeat_instrument))))
 
   s_eval <- all_data %>%
-    filter(!is.na(s_eval_complete))
+    filter((redcap_repeat_instrument == "s_eval" | is.na(redcap_repeat_instrument)) &
+           !is.na(s_eval_complete))
 
   ilp <- all_data %>%
-    filter(!is.na(ilp_complete))
+    filter((redcap_repeat_instrument == "ilp" | is.na(redcap_repeat_instrument)) &
+           !is.na(ilp_complete))
 
   questions <- all_data %>%
-    filter(!is.na(questions_complete))
+    filter((redcap_repeat_instrument == "questions" | is.na(redcap_repeat_instrument)) &
+           !is.na(questions_complete))
 
   cat("✓ Forms separated:\n")
   cat("  • resident_data:", nrow(resident_data), "rows\n")
