@@ -1,6 +1,7 @@
 library(REDCapR)
 library(tidyverse)
 library(lubridate)
+library(httr)
 
 # ==============================================================================
 # REDCap Data Download Functions
@@ -16,85 +17,60 @@ download_faculty_data <- function() {
   return(result$data)
 }
 
-# Download RDM data - simplified approach, download everything
+# Download RDM data - using direct POST to request specific forms
 download_rdm_focused <- function(faculty_data = NULL) {
-  cat("Downloading complete RDM database (all data)...\n")
+  cat("Downloading RDM database (specific forms)...\n")
 
-  # Simple download - get ALL data, no form filtering
-  # This ensures we get all repeating instances
-  # Use raw_or_label = 'label' to get actual text values instead of codes
-  all_data <- REDCapR::redcap_read(
-    redcap_uri = Sys.getenv("REDCAP_URL"),
-    token = Sys.getenv("RDM_REDCAP_TOKEN"),
-    raw_or_label = 'label'
-  )$data
+  # Use direct httr::POST for cleaner form filtering
+  # rawOrLabel='raw' keeps data as-is (no conversion to display labels)
+  formData <- list(
+    "token" = Sys.getenv("RDM_REDCAP_TOKEN"),
+    content = 'record',
+    action = 'export',
+    format = 'csv',
+    type = 'flat',
+    csvDelimiter = '',
+    'forms[0]' = 'resident_data',
+    'forms[1]' = 'assessment',
+    'forms[2]' = 'faculty_evaluation',
+    'forms[3]' = 's_eval',
+    'forms[4]' = 'ilp',
+    'forms[5]' = 'questions',
+    rawOrLabel = 'raw',
+    rawOrLabelHeaders = 'raw',
+    exportCheckboxLabel = 'false',
+    exportSurveyFields = 'false',
+    exportDataAccessGroups = 'false',
+    returnFormat = 'json'
+  )
+
+  response <- httr::POST(Sys.getenv("REDCAP_URL"), body = formData, encode = "form")
+  all_data <- httr::content(response, as = "parsed", type = "text/csv")
 
   cat("✓ Downloaded", nrow(all_data), "total records\n")
-
-  # Check if fac_fell_name is numeric (coded field)
-  if ("fac_fell_name" %in% names(all_data) && is.numeric(all_data$fac_fell_name)) {
-    cat("\n⚠ fac_fell_name is NUMERIC - converting to faculty names...\n")
-
-    if (!is.null(faculty_data)) {
-      # Create mapping from numeric code to faculty name
-      # Assuming codes correspond to record_id in faculty database
-      name_mapping <- faculty_data %>%
-        select(record_id, fac_name) %>%
-        filter(!is.na(record_id), !is.na(fac_name))
-
-      cat("  • Created mapping for", nrow(name_mapping), "faculty members\n")
-
-      # Convert numeric codes to names
-      # Store original numeric value temporarily
-      all_data <- all_data %>%
-        mutate(
-          fac_fell_name_code = fac_fell_name,
-          fac_fell_name = name_mapping$fac_name[match(fac_fell_name, name_mapping$record_id)]
-        )
-
-      # Count successful conversions
-      n_converted <- sum(!is.na(all_data$fac_fell_name))
-      cat("  • Converted", n_converted, "records from numeric codes to faculty names\n")
-
-      # Drop the temporary code column
-      all_data <- all_data %>%
-        select(-fac_fell_name_code)
-
-    } else {
-      cat("  ✗ No faculty data provided - cannot convert codes to names\n")
-      cat("  • Keeping numeric codes (filtering may not work correctly)\n")
-    }
-  }
-
-  cat("\nSeparating forms by completion fields...\n")
+  cat("Separating forms by redcap_repeat_instrument field...\n")
 
   # Separate by repeating instrument field
-  # Don't require _complete fields - include any data that exists
-  # For base records: redcap_repeat_instrument is NA
+  # For base records: redcap_repeat_instrument is NA or empty
   # For repeating records: redcap_repeat_instrument has the form name
 
   resident_data <- all_data %>%
-    filter(is.na(redcap_repeat_instrument))
+    filter(is.na(redcap_repeat_instrument) | redcap_repeat_instrument == "")
 
   assessment <- all_data %>%
-    filter(redcap_repeat_instrument == "Assessment" |
-           (is.na(redcap_repeat_instrument) & !is.na(assessment_complete)))
+    filter(redcap_repeat_instrument == "assessment")
 
   faculty_eval <- all_data %>%
-    filter(redcap_repeat_instrument == "Faculty Evaluation" |
-           (is.na(redcap_repeat_instrument) & !is.na(faculty_evaluation_complete)))
+    filter(redcap_repeat_instrument == "faculty_evaluation")
 
   s_eval <- all_data %>%
-    filter(redcap_repeat_instrument == "S Eval" |
-           (is.na(redcap_repeat_instrument) & !is.na(s_eval_complete)))
+    filter(redcap_repeat_instrument == "s_eval")
 
   ilp <- all_data %>%
-    filter(redcap_repeat_instrument == "Ilp" |
-           (is.na(redcap_repeat_instrument) & !is.na(ilp_complete)))
+    filter(redcap_repeat_instrument == "ilp")
 
   questions <- all_data %>%
-    filter(redcap_repeat_instrument == "Questions" |
-           (is.na(redcap_repeat_instrument) & !is.na(questions_complete)))
+    filter(redcap_repeat_instrument == "questions")
 
   cat("✓ Forms separated:\n")
   cat("  • resident_data:", nrow(resident_data), "rows\n")
@@ -120,7 +96,7 @@ save_test_data <- function() {
   cat("\n=== Saving test data for offline development ===\n")
 
   faculty_data <- download_faculty_data()
-  rdm_data <- download_rdm_focused(faculty_data = faculty_data)
+  rdm_data <- download_rdm_focused()
 
   # Save as RDS files
   saveRDS(faculty_data, "data/faculty_test.rds")
