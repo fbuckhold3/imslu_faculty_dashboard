@@ -16,20 +16,22 @@ download_faculty_data <- function() {
   return(result$data)
 }
 
-# Download RDM data - all forms for all residents
+# Download RDM data - simplified approach, download everything
 download_rdm_focused <- function() {
-  cat("Downloading complete RDM database...\n")
+  cat("Downloading complete RDM database (all data)...\n")
 
-  # Download all needed forms - for ALL residents (no archive filter)
+  # Simple download - get ALL data, no form filtering
+  # This ensures we get all repeating instances
   all_data <- REDCapR::redcap_read(
     redcap_uri = Sys.getenv("REDCAP_URL"),
-    token = Sys.getenv("RDM_REDCAP_TOKEN"),
-    forms = c("resident_data", "assessment", "faculty_evaluation", "s_eval", "ilp")
+    token = Sys.getenv("RDM_REDCAP_TOKEN")
   )$data
 
-  cat("Separating forms...\n")
+  cat("✓ Downloaded", nrow(all_data), "total records\n")
+  cat("Separating forms by completion fields...\n")
 
   # Separate by form completion fields
+  # Each form has its own _complete field
   resident_data <- all_data %>%
     filter(!is.na(resident_data_complete))
 
@@ -45,12 +47,16 @@ download_rdm_focused <- function() {
   ilp <- all_data %>%
     filter(!is.na(ilp_complete))
 
-  cat("✓ Forms downloaded:\n")
+  questions <- all_data %>%
+    filter(!is.na(questions_complete))
+
+  cat("✓ Forms separated:\n")
   cat("  • resident_data:", nrow(resident_data), "rows\n")
   cat("  • assessment:", nrow(assessment), "rows\n")
   cat("  • faculty_evaluation:", nrow(faculty_eval), "rows\n")
   cat("  • s_eval:", nrow(s_eval), "rows\n")
   cat("  • ilp:", nrow(ilp), "rows\n")
+  cat("  • questions:", nrow(questions), "rows\n")
 
   # Return as named list
   list(
@@ -58,7 +64,8 @@ download_rdm_focused <- function() {
     assessment = assessment,
     faculty_evaluation = faculty_eval,
     s_eval = s_eval,
-    ilp = ilp
+    ilp = ilp,
+    questions = questions
   )
 }
 
