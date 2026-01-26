@@ -45,7 +45,7 @@ download_rdm_focused <- function(faculty_data = NULL) {
   )
 
   response <- httr::POST(Sys.getenv("REDCAP_URL"), body = formData, encode = "form")
-  all_data <- httr::content(response, as = "parsed", type = "text/csv")
+  all_data <- httr::content(response)
 
   cat("✓ Downloaded", nrow(all_data), "total records\n")
   cat("Separating forms by redcap_repeat_instrument field...\n")
