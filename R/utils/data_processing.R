@@ -16,61 +16,49 @@ download_faculty_data <- function() {
   return(result$data)
 }
 
-# Download RDM data - focused on only the forms we need
-# Downloads all forms in ONE call for speed (vs 5 separate calls)
+# Download RDM data - all forms for all residents
 download_rdm_focused <- function() {
-  cat("Downloading RDM data (all needed forms in one call)...\n")
-  
-  # Download all forms at once - MUCH faster!
+  cat("Downloading complete RDM database...\n")
+
+  # Download all needed forms - for ALL residents (no archive filter)
   all_data <- REDCapR::redcap_read(
     redcap_uri = Sys.getenv("REDCAP_URL"),
     token = Sys.getenv("RDM_REDCAP_TOKEN"),
-    forms = c("assessment", "faculty_evaluation", "s_eval", "questions", "resident_data")
+    forms = c("resident_data", "assessment", "faculty_evaluation", "s_eval", "ilp")
   )$data
-  
+
   cat("Separating forms...\n")
-  
+
   # Separate by form completion fields
-  # Each form has a corresponding "_complete" field
-  assessment <- all_data %>%
-    filter(!is.na(assessment_complete)) %>%
-    select(-c(faculty_evaluation_complete, s_eval_complete, 
-              questions_complete, resident_data_complete))
-  
-  faculty_eval <- all_data %>%
-    filter(!is.na(faculty_evaluation_complete)) %>%
-    select(-c(assessment_complete, s_eval_complete, 
-              questions_complete, resident_data_complete))
-  
-  s_eval <- all_data %>%
-    filter(!is.na(s_eval_complete)) %>%
-    select(-c(assessment_complete, faculty_evaluation_complete, 
-              questions_complete, resident_data_complete))
-  
-  questions <- all_data %>%
-    filter(!is.na(questions_complete)) %>%
-    select(-c(assessment_complete, faculty_evaluation_complete, 
-              s_eval_complete, resident_data_complete))
-  
   resident_data <- all_data %>%
-    filter(!is.na(resident_data_complete)) %>%
-    select(-c(assessment_complete, faculty_evaluation_complete, 
-              s_eval_complete, questions_complete))
-  
-  cat("✓ Forms separated:\n")
+    filter(!is.na(resident_data_complete))
+
+  assessment <- all_data %>%
+    filter(!is.na(assessment_complete))
+
+  faculty_eval <- all_data %>%
+    filter(!is.na(faculty_evaluation_complete))
+
+  s_eval <- all_data %>%
+    filter(!is.na(s_eval_complete))
+
+  ilp <- all_data %>%
+    filter(!is.na(ilp_complete))
+
+  cat("✓ Forms downloaded:\n")
+  cat("  • resident_data:", nrow(resident_data), "rows\n")
   cat("  • assessment:", nrow(assessment), "rows\n")
   cat("  • faculty_evaluation:", nrow(faculty_eval), "rows\n")
   cat("  • s_eval:", nrow(s_eval), "rows\n")
-  cat("  • questions:", nrow(questions), "rows\n")
-  cat("  • resident_data:", nrow(resident_data), "rows\n")
-  
+  cat("  • ilp:", nrow(ilp), "rows\n")
+
   # Return as named list
   list(
+    resident_data = resident_data,
     assessment = assessment,
     faculty_evaluation = faculty_eval,
     s_eval = s_eval,
-    questions = questions,
-    resident_data = resident_data
+    ilp = ilp
   )
 }
 
