@@ -17,7 +17,7 @@ download_faculty_data <- function() {
 }
 
 # Download RDM data - simplified approach, download everything
-download_rdm_focused <- function() {
+download_rdm_focused <- function(faculty_data = NULL) {
   cat("Downloading complete RDM database (all data)...\n")
 
   # Simple download - get ALL data, no form filtering
@@ -28,7 +28,43 @@ download_rdm_focused <- function() {
   )$data
 
   cat("✓ Downloaded", nrow(all_data), "total records\n")
-  cat("Separating forms by completion fields...\n")
+
+  # Check if fac_fell_name is numeric (coded field)
+  if ("fac_fell_name" %in% names(all_data) && is.numeric(all_data$fac_fell_name)) {
+    cat("\n⚠ fac_fell_name is NUMERIC - converting to faculty names...\n")
+
+    if (!is.null(faculty_data)) {
+      # Create mapping from numeric code to faculty name
+      # Assuming codes correspond to record_id in faculty database
+      name_mapping <- faculty_data %>%
+        select(record_id, fac_name) %>%
+        filter(!is.na(record_id), !is.na(fac_name))
+
+      cat("  • Created mapping for", nrow(name_mapping), "faculty members\n")
+
+      # Convert numeric codes to names
+      # Store original numeric value temporarily
+      all_data <- all_data %>%
+        mutate(
+          fac_fell_name_code = fac_fell_name,
+          fac_fell_name = name_mapping$fac_name[match(fac_fell_name, name_mapping$record_id)]
+        )
+
+      # Count successful conversions
+      n_converted <- sum(!is.na(all_data$fac_fell_name))
+      cat("  • Converted", n_converted, "records from numeric codes to faculty names\n")
+
+      # Drop the temporary code column
+      all_data <- all_data %>%
+        select(-fac_fell_name_code)
+
+    } else {
+      cat("  ✗ No faculty data provided - cannot convert codes to names\n")
+      cat("  • Keeping numeric codes (filtering may not work correctly)\n")
+    }
+  }
+
+  cat("\nSeparating forms by completion fields...\n")
 
   # Separate by repeating instrument field
   # Don't require _complete fields - include any data that exists
@@ -80,14 +116,14 @@ download_rdm_focused <- function() {
 # Save data locally for testing (avoids hitting API repeatedly during development)
 save_test_data <- function() {
   cat("\n=== Saving test data for offline development ===\n")
-  
+
   faculty_data <- download_faculty_data()
-  rdm_data <- download_rdm_focused()
-  
+  rdm_data <- download_rdm_focused(faculty_data = faculty_data)
+
   # Save as RDS files
   saveRDS(faculty_data, "data/faculty_test.rds")
   saveRDS(rdm_data, "data/rdm_test.rds")
-  
+
   cat("\n✓ Data saved successfully!\n")
   cat("  - data/faculty_test.rds:", nrow(faculty_data), "rows\n")
   cat("  - data/rdm_test.rds: List with", length(rdm_data), "forms\n")

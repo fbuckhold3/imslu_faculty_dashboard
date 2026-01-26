@@ -10,7 +10,7 @@ cat("\n=== DIAGNOSTIC CHECK ===\n\n")
 # Load data
 cat("1. Loading data from REDCap...\n")
 faculty_data <- download_faculty_data()
-rdm_data <- download_rdm_focused()
+rdm_data <- download_rdm_focused(faculty_data = faculty_data)
 cat("   ✓ Data loaded\n\n")
 
 # Check faculty data
