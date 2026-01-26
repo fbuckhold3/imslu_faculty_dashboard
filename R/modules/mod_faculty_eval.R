@@ -94,6 +94,9 @@ mod_faculty_eval_ui <- function(id) {
       )
     ),
 
+    # Faculty summary table (dashboard mode only)
+    uiOutput(ns("faculty_summary_ui")),
+
     # Feedback tables
     fluidRow(
       column(
@@ -499,6 +502,91 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       } else {
         create_eval_comparison_table(comparison_data())
       }
+    })
+
+    # Faculty summary UI (only show in dashboard mode)
+    output$faculty_summary_ui <- renderUI({
+      req(faculty_info())
+
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show == "__dashboard__") {
+        # Dashboard mode - show faculty summary table
+        fluidRow(
+          column(
+            width = 12,
+            box(
+              title = "Faculty Performance Summary",
+              width = 12,
+              status = "success",
+              solidHeader = TRUE,
+              collapsible = TRUE,
+              DT::dataTableOutput(ns("faculty_summary_table")),
+              tags$p(
+                class = "text-muted",
+                tags$small("Shows evaluation and assessment statistics for the current academic year. Evaluations Received = evaluations of this faculty member's teaching. Assessments Given = resident assessments conducted by this faculty member.")
+              )
+            )
+          )
+        )
+      } else {
+        # Individual mode - don't show summary table
+        return(NULL)
+      }
+    })
+
+    # Faculty summary table
+    output$faculty_summary_table <- DT::renderDataTable({
+      req(faculty_info(), display_faculty() == "__dashboard__")
+
+      access_level <- faculty_info()$access_level
+
+      # Determine which faculty to include
+      if (access_level == "department_leader") {
+        if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+          # Specific division
+          faculty_list <- faculty_data %>%
+            filter(archived == 0, fac_div == input$selected_division) %>%
+            pull(fac_name)
+        } else {
+          # All divisions
+          faculty_list <- faculty_info()$accessible_faculty
+        }
+      } else {
+        # Division admin
+        faculty_list <- faculty_info()$accessible_faculty
+      }
+
+      # Get current year setting
+      year <- if (input$time_filter == "current") "current" else "all"
+
+      # Create summary table
+      summary_data <- create_faculty_summary_table(
+        rdm_data$faculty_evaluation,
+        rdm_data$assessment,
+        faculty_list,
+        year
+      )
+
+      # Render datatable
+      datatable(
+        summary_data,
+        colnames = c(
+          "Faculty Name",
+          "Evaluations Received",
+          "Avg Overall Rating",
+          "Avg Time for Teaching",
+          "Assessments Given"
+        ),
+        options = list(
+          pageLength = 25,
+          order = list(list(1, 'desc')),  # Sort by evaluations received
+          dom = 'Bfrtip',
+          buttons = c('copy', 'csv', 'excel')
+        ),
+        rownames = FALSE
+      ) %>%
+        formatRound(columns = c("avg_overall", "avg_time_teaching"), digits = 2)
     })
 
     # Plus feedback table
