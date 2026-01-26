@@ -98,6 +98,41 @@ check_minimum_threshold <- function(data, threshold = MIN_EVALUATIONS) {
 }
 
 # ==============================================================================
+# Assessment Counting Functions
+# ==============================================================================
+
+#' Count assessments given by each faculty member
+#'
+#' @param assessment_data Assessment data frame with ass_faculty and ass_date columns
+#' @param faculty_list Optional vector of faculty names to filter by
+#' @param year Academic year ("current", "all", or specific like "2024-2025")
+#' @return Data frame with faculty name and assessment count
+count_assessments_by_faculty <- function(assessment_data, faculty_list = NULL, year = "current") {
+  # Filter by year if requested
+  if (year != "all") {
+    assessment_data <- filter_by_academic_year(assessment_data, date_col = "ass_date", year = year)
+  }
+
+  # Filter by faculty list if provided
+  if (!is.null(faculty_list)) {
+    assessment_data <- assessment_data %>%
+      filter(ass_faculty %in% faculty_list)
+  }
+
+  # Count assessments per faculty
+  counts <- assessment_data %>%
+    filter(!is.na(ass_faculty), ass_faculty != "") %>%
+    group_by(ass_faculty) %>%
+    summarize(
+      assessment_count = n(),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(assessment_count))
+
+  return(counts)
+}
+
+# ==============================================================================
 # Calculation Functions
 # ==============================================================================
 
@@ -195,6 +230,48 @@ get_faculty_feedback <- function(eval_data, faculty_name) {
       select(fac_eval_date, delta) %>%
       arrange(desc(fac_eval_date))
   )
+}
+
+#' Create faculty summary table with evaluation and assessment stats
+#'
+#' @param faculty_eval_data Faculty evaluation data
+#' @param assessment_data Assessment data
+#' @param faculty_list Vector of faculty names to include
+#' @param year Academic year for filtering
+#' @return Data frame with faculty summary statistics
+create_faculty_summary_table <- function(faculty_eval_data, assessment_data, faculty_list, year = "current") {
+  # Get evaluation counts and averages for each faculty
+  eval_summary <- faculty_eval_data %>%
+    filter(fac_fell_name %in% faculty_list) %>%
+    {if (year != "all") filter_by_academic_year(., "fac_eval_date", year) else .} %>%
+    group_by(fac_fell_name) %>%
+    summarize(
+      evaluations_received = n(),
+      avg_overall = mean(att_overall, na.rm = TRUE),
+      avg_time_teaching = mean(time_teaching, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  # Get assessment counts
+  assessment_counts <- count_assessments_by_faculty(assessment_data, faculty_list, year) %>%
+    rename(fac_fell_name = ass_faculty)
+
+  # Combine
+  summary_table <- expand.grid(
+    fac_fell_name = faculty_list,
+    stringsAsFactors = FALSE
+  ) %>%
+    left_join(eval_summary, by = "fac_fell_name") %>%
+    left_join(assessment_counts, by = "fac_fell_name") %>%
+    mutate(
+      evaluations_received = replace_na(evaluations_received, 0),
+      assessment_count = replace_na(assessment_count, 0),
+      avg_overall = round(avg_overall, 2),
+      avg_time_teaching = round(avg_time_teaching, 2)
+    ) %>%
+    arrange(desc(evaluations_received))
+
+  return(summary_table)
 }
 
 # ==============================================================================
