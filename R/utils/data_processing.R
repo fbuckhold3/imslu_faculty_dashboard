@@ -40,12 +40,13 @@ download_rdm_focused <- function(faculty_data = NULL) {
     rawOrLabelHeaders = 'raw',
     exportCheckboxLabel = 'false',
     exportSurveyFields = 'false',
-    exportDataAccessGroups = 'false',
-    returnFormat = 'json'
+    exportDataAccessGroups = 'false'
   )
 
   response <- httr::POST(Sys.getenv("REDCAP_URL"), body = formData, encode = "form")
-  all_data <- httr::content(response)
+  # Get raw text content and parse with readr::read_csv with better settings
+  raw_text <- httr::content(response, as = "text", encoding = "UTF-8")
+  all_data <- readr::read_csv(raw_text, show_col_types = FALSE, guess_max = 5000)
 
   cat("✓ Downloaded", nrow(all_data), "total records\n")
   cat("Separating forms by redcap_repeat_instrument field...\n")
