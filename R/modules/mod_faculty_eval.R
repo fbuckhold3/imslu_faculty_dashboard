@@ -236,24 +236,37 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       req(faculty_info(), display_faculty())
 
       faculty_to_show <- display_faculty()
+      access_level <- faculty_info()$access_level
 
       # Get base evaluations
       if (faculty_to_show == "__dashboard__") {
-        # Dashboard mode - show all accessible faculty
-        accessible_names <- faculty_info()$accessible_faculty
-        evals <- rdm_data$faculty_evaluation %>%
-          filter(fac_fell_name %in% accessible_names)
+        # Dashboard mode - determine scope based on access level and division selection
+
+        if (access_level == "department_leader") {
+          # Department leader - check if specific division selected
+          if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+            # Filter to specific division
+            division_faculty <- faculty_data %>%
+              filter(archived == 0, fac_div == input$selected_division) %>%
+              pull(fac_name)
+
+            evals <- rdm_data$faculty_evaluation %>%
+              filter(fac_fell_name %in% division_faculty)
+          } else {
+            # All divisions - show all accessible faculty
+            evals <- rdm_data$faculty_evaluation %>%
+              filter(fac_fell_name %in% faculty_info()$accessible_faculty)
+          }
+        } else {
+          # Division admin - show their division
+          evals <- rdm_data$faculty_evaluation %>%
+            filter(fac_fell_name %in% faculty_info()$accessible_faculty)
+        }
       } else {
         # Individual mode - show selected faculty
         evals <- rdm_data$faculty_evaluation %>%
           filter(fac_fell_name == faculty_to_show)
       }
-
-      # Apply time delay (6 months) - REMOVED for now
-      # Privacy delay not needed when viewing own data or aggregate dashboards
-      # if ("fac_eval_date" %in% names(evals)) {
-      #   evals <- apply_time_delay(evals, "fac_eval_date")
-      # }
 
       # Apply academic year filter
       if (input$time_filter == "current" && "fac_eval_date" %in% names(evals)) {
@@ -310,8 +323,14 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       # Determine what's being shown
       view_description <- if (faculty_to_show == "__dashboard__") {
         access_level <- faculty_info()$access_level
-        if (access_level == "meded_admin") {
-          "All Faculty (Aggregate)"
+        if (access_level == "department_leader") {
+          if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+            paste0("Division: ", input$selected_division, " (Aggregate)")
+          } else {
+            "All Divisions (Aggregate)"
+          }
+        } else if (access_level == "division_admin") {
+          paste0("Division: ", faculty_info()$accessible_divisions, " (Aggregate)")
         } else {
           "Division (Aggregate)"
         }
@@ -418,10 +437,14 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
         # Determine label
         if (faculty_to_show == "__dashboard__") {
           access_level <- faculty_info()$access_level
-          label <- if (access_level == "meded_admin") {
-            "All Faculty Average"
+          if (access_level == "department_leader") {
+            if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+              label <- paste0(input$selected_division, " Average")
+            } else {
+              label <- "All Divisions Average"
+            }
           } else {
-            "Division Average"
+            label <- "Division Average"
           }
         } else {
           label <- "Your Scores"
@@ -448,10 +471,14 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
         # Determine label
         if (faculty_to_show == "__dashboard__") {
           access_level <- faculty_info()$access_level
-          label <- if (access_level == "meded_admin") {
-            "All Faculty"
+          if (access_level == "department_leader") {
+            if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+              label <- input$selected_division
+            } else {
+              label <- "All Divisions"
+            }
           } else {
-            "Division"
+            label <- "Division"
           }
         } else {
           label <- "Your Score"
