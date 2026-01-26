@@ -22,9 +22,11 @@ download_rdm_focused <- function(faculty_data = NULL) {
 
   # Simple download - get ALL data, no form filtering
   # This ensures we get all repeating instances
+  # Use raw_or_label = 'label' to get actual text values instead of codes
   all_data <- REDCapR::redcap_read(
     redcap_uri = Sys.getenv("REDCAP_URL"),
-    token = Sys.getenv("RDM_REDCAP_TOKEN")
+    token = Sys.getenv("RDM_REDCAP_TOKEN"),
+    raw_or_label = 'label'
   )$data
 
   cat("✓ Downloaded", nrow(all_data), "total records\n")
