@@ -77,23 +77,23 @@ download_rdm_focused <- function(faculty_data = NULL) {
     filter(is.na(redcap_repeat_instrument))
 
   assessment <- all_data %>%
-    filter(redcap_repeat_instrument == "assessment" |
+    filter(redcap_repeat_instrument == "Assessment" |
            (is.na(redcap_repeat_instrument) & !is.na(assessment_complete)))
 
   faculty_eval <- all_data %>%
-    filter(redcap_repeat_instrument == "faculty_evaluation" |
+    filter(redcap_repeat_instrument == "Faculty Evaluation" |
            (is.na(redcap_repeat_instrument) & !is.na(faculty_evaluation_complete)))
 
   s_eval <- all_data %>%
-    filter(redcap_repeat_instrument == "s_eval" |
+    filter(redcap_repeat_instrument == "S Eval" |
            (is.na(redcap_repeat_instrument) & !is.na(s_eval_complete)))
 
   ilp <- all_data %>%
-    filter(redcap_repeat_instrument == "ilp" |
+    filter(redcap_repeat_instrument == "Ilp" |
            (is.na(redcap_repeat_instrument) & !is.na(ilp_complete)))
 
   questions <- all_data %>%
-    filter(redcap_repeat_instrument == "questions" |
+    filter(redcap_repeat_instrument == "Questions" |
            (is.na(redcap_repeat_instrument) & !is.na(questions_complete)))
 
   cat("✓ Forms separated:\n")

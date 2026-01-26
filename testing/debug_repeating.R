@@ -24,9 +24,9 @@ cat("Total records downloaded:", nrow(all_data), "\n\n")
 cat("Unique values in redcap_repeat_instrument:\n")
 print(table(all_data$redcap_repeat_instrument, useNA = "always"))
 
-cat("\n\nRecords where redcap_repeat_instrument == 'faculty_evaluation':\n")
+cat("\n\nRecords where redcap_repeat_instrument == 'Faculty Evaluation':\n")
 fac_eval_repeat <- all_data %>%
-  filter(redcap_repeat_instrument == "faculty_evaluation")
+  filter(redcap_repeat_instrument == "Faculty Evaluation")
 cat("  Count:", nrow(fac_eval_repeat), "\n")
 
 # Check how many have fac_fell_name filled
@@ -72,8 +72,8 @@ if (is.numeric(all_data$fac_fell_name)) {
 
     if (nrow(fred_code_evals) > 0) {
       cat("    ✓ FOUND EVALUATIONS USING NUMERIC CODE!\n")
-      cat("    With redcap_repeat_instrument == 'faculty_evaluation':",
-          sum(fred_code_evals$redcap_repeat_instrument == "faculty_evaluation", na.rm = TRUE), "\n")
+      cat("    With redcap_repeat_instrument == 'Faculty Evaluation':",
+          sum(fred_code_evals$redcap_repeat_instrument == "Faculty Evaluation", na.rm = TRUE), "\n")
       cat("    With NA redcap_repeat_instrument:",
           sum(is.na(fred_code_evals$redcap_repeat_instrument)), "\n")
     }
