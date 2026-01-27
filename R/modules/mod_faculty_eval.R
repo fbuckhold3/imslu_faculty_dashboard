@@ -1,5 +1,6 @@
-# Faculty Evaluation Module
+# Faculty Evaluation Module (Simplified)
 # Displays individual faculty evaluation data with filtering and visualizations
+# Leaders can select which faculty member to view
 
 mod_faculty_eval_ui <- function(id) {
   ns <- NS(id)
@@ -17,18 +18,13 @@ mod_faculty_eval_ui <- function(id) {
           collapsible = TRUE,
 
           fluidRow(
-            # Division selector (for department leaders only)
+            # Faculty selector (for leaders to select individual faculty)
             column(
-              width = 3,
-              uiOutput(ns("division_selector_ui"))
-            ),
-            # Faculty selector (for admins and leaders)
-            column(
-              width = 3,
+              width = 4,
               uiOutput(ns("faculty_selector_ui"))
             ),
             column(
-              width = 3,
+              width = 4,
               radioButtons(
                 ns("time_filter"),
                 "Time Period:",
@@ -40,7 +36,7 @@ mod_faculty_eval_ui <- function(id) {
               )
             ),
             column(
-              width = 3,
+              width = 4,
               uiOutput(ns("filter_info"))
             )
           )
@@ -94,9 +90,6 @@ mod_faculty_eval_ui <- function(id) {
       )
     ),
 
-    # Faculty summary table (dashboard mode only)
-    uiOutput(ns("faculty_summary_ui")),
-
     # Feedback tables
     fluidRow(
       column(
@@ -129,81 +122,30 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # Show division selector for department leaders
-    output$division_selector_ui <- renderUI({
-      req(faculty_info())
-
-      access_level <- faculty_info()$access_level
-
-      if (access_level != "department_leader") {
-        # Only department leaders see division selector
-        return(NULL)
-      }
-
-      all_divisions <- faculty_info()$all_divisions
-
-      selectInput(
-        ns("selected_division"),
-        "Select Division:",
-        choices = c(
-          "All Divisions" = "__all__",
-          setNames(all_divisions, all_divisions)
-        ),
-        selected = "__all__"
-      )
-    })
-
-    # Show faculty selector for admins and leaders
+    # Show faculty selector for leaders
     output$faculty_selector_ui <- renderUI({
       req(faculty_info())
 
       access_level <- faculty_info()$access_level
 
       if (access_level == "individual") {
-        # Regular faculty - no selector needed
-        return(NULL)
-      }
-
-      # Get accessible faculty, filtered by division if department leader
-      if (access_level == "department_leader") {
-        req(input$selected_division)
-
-        if (input$selected_division == "__all__") {
-          # Show all active faculty
-          accessible_faculty <- faculty_data %>%
-            filter(archived == 0) %>%
-            arrange(fac_name) %>%
-            pull(fac_name)
-        } else {
-          # Filter to selected division
-          accessible_faculty <- faculty_data %>%
-            filter(archived == 0, fac_div == input$selected_division) %>%
-            arrange(fac_name) %>%
-            pull(fac_name)
-        }
-
-        view_label <- "View: Division or Individual"
+        # Regular faculty - no selector, show message
+        tags$div(
+          tags$strong("Viewing:"),
+          tags$p(class = "text-info", style = "font-size: 18px; margin-top: 10px;",
+                 faculty_info()$fac_name)
+        )
       } else {
-        # Division admin - show their division
+        # Leaders - show faculty selector
         accessible_faculty <- faculty_info()$accessible_faculty
-        view_label <- "View: Division or Individual"
-      }
 
-      tagList(
         selectInput(
           ns("selected_faculty"),
-          view_label,
-          choices = c(
-            "Aggregate Dashboard (Summary)" = "__dashboard__",
-            setNames(accessible_faculty, accessible_faculty)
-          ),
-          selected = "__dashboard__"
-        ),
-        tags$small(
-          class = "text-muted",
-          "Aggregate shows summary statistics. Select individual faculty to see their comments and detailed evaluation data."
+          "Select Faculty to View:",
+          choices = setNames(accessible_faculty, accessible_faculty),
+          selected = accessible_faculty[1]
         )
-      )
+      }
     })
 
     # Determine which faculty to show
@@ -215,61 +157,22 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       if (access_level == "individual") {
         # Regular faculty - show their own data
         return(faculty_info()$fac_name)
-      }
-
-      # Admin or med ed leader
-      req(input$selected_faculty)
-
-      # Validate selection
-      if (is.null(input$selected_faculty) || input$selected_faculty == "") {
-        return("__dashboard__")  # Default to dashboard if invalid selection
-      }
-
-      if (input$selected_faculty == "__dashboard__") {
-        # Show aggregate dashboard
-        return("__dashboard__")
       } else {
-        # Show selected individual faculty
+        # Leaders - show selected faculty
+        req(input$selected_faculty)
         return(input$selected_faculty)
       }
     })
 
-    # Reactive: filtered evaluation data
+    # Reactive: filtered evaluation data for selected faculty
     filtered_evals <- reactive({
-      req(faculty_info(), display_faculty())
+      req(display_faculty())
 
       faculty_to_show <- display_faculty()
-      access_level <- faculty_info()$access_level
 
-      # Get base evaluations
-      if (faculty_to_show == "__dashboard__") {
-        # Dashboard mode - determine scope based on access level and division selection
-
-        if (access_level == "department_leader") {
-          # Department leader - check if specific division selected
-          if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-            # Filter to specific division
-            division_faculty <- faculty_data %>%
-              filter(archived == 0, fac_div == input$selected_division) %>%
-              pull(fac_name)
-
-            evals <- rdm_data$faculty_evaluation %>%
-              filter(fac_fell_name %in% division_faculty)
-          } else {
-            # All divisions - show all accessible faculty
-            evals <- rdm_data$faculty_evaluation %>%
-              filter(fac_fell_name %in% faculty_info()$accessible_faculty)
-          }
-        } else {
-          # Division admin - show their division
-          evals <- rdm_data$faculty_evaluation %>%
-            filter(fac_fell_name %in% faculty_info()$accessible_faculty)
-        }
-      } else {
-        # Individual mode - show selected faculty
-        evals <- rdm_data$faculty_evaluation %>%
-          filter(fac_fell_name == faculty_to_show)
-      }
+      # Get evaluations for this specific faculty member
+      evals <- rdm_data$faculty_evaluation %>%
+        filter(fac_fell_name == faculty_to_show)
 
       # Apply academic year filter
       if (input$time_filter == "current" && "fac_eval_date" %in% names(evals)) {
@@ -279,10 +182,8 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       evals
     })
 
-    # Reactive: all faculty evaluations (for comparison - ENTIRE dataset, no filters)
+    # Reactive: all faculty evaluations (for comparison baseline)
     all_evals <- reactive({
-      # Return complete dataset for comparison means
-      # No time delay, no academic year filter
       rdm_data$faculty_evaluation
     })
 
@@ -291,25 +192,18 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       check_minimum_threshold(filtered_evals())
     })
 
-    # Reactive: calculate means
+    # Reactive: calculate means for individual faculty
     individual_means <- reactive({
       req(meets_threshold())
-
-      faculty_to_show <- display_faculty()
-
-      if (faculty_to_show == "__dashboard__") {
-        # Dashboard mode - calculate aggregate for accessible faculty
-        calculate_faculty_eval_means(filtered_evals(), faculty_name = NULL)
-      } else {
-        # Individual mode - calculate for specific faculty
-        calculate_faculty_eval_means(filtered_evals(), faculty_name = faculty_to_show)
-      }
+      calculate_faculty_eval_means(filtered_evals(), faculty_name = display_faculty())
     })
 
+    # Reactive: all faculty means for comparison
     all_means <- reactive({
       calculate_all_faculty_means(all_evals())
     })
 
+    # Comparison data
     comparison_data <- reactive({
       req(meets_threshold())
       create_comparison_table(individual_means(), all_means())
@@ -317,35 +211,17 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
 
     # Filter info output
     output$filter_info <- renderUI({
-      req(faculty_info())
+      req(display_faculty())
 
       n_evals <- nrow(filtered_evals())
       current_year <- get_current_academic_year()
       faculty_to_show <- display_faculty()
 
-      # Determine what's being shown
-      view_description <- if (faculty_to_show == "__dashboard__") {
-        access_level <- faculty_info()$access_level
-        if (access_level == "department_leader") {
-          if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-            paste0("Division: ", input$selected_division, " (Aggregate)")
-          } else {
-            "All Divisions (Aggregate)"
-          }
-        } else if (access_level == "division_admin") {
-          paste0("Division: ", faculty_info()$accessible_divisions, " (Aggregate)")
-        } else {
-          "Division (Aggregate)"
-        }
-      } else {
-        paste0("Individual: ", faculty_to_show)
-      }
-
       if (!meets_threshold()) {
         tags$div(
           class = "alert alert-warning",
           icon("exclamation-triangle"),
-          tags$strong(view_description), tags$br(),
+          tags$strong(faculty_to_show), tags$br(),
           sprintf(
             "Fewer than %d evaluations available for this period. Data not shown to protect privacy.",
             MIN_EVALUATIONS
@@ -354,16 +230,16 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       } else {
         if (input$time_filter == "current") {
           time_info <- paste0(" (Current year: ", current_year, ")")
-          note <- "Comparison to entire dataset baseline."
+          note <- "Comparison to entire department baseline."
         } else {
           time_info <- " (All time)"
-          note <- "Includes evaluations without dates. Comparison to entire dataset baseline."
+          note <- "Includes evaluations without dates. Comparison to entire department baseline."
         }
 
         tags$div(
           class = "alert alert-info",
           icon("info-circle"),
-          tags$strong(view_description), tags$br(),
+          tags$strong(faculty_to_show), tags$br(),
           sprintf(
             "Showing %d evaluations%s. %s",
             n_evals,
@@ -435,25 +311,7 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
             )
           )
       } else {
-        faculty_to_show <- display_faculty()
-
-        # Determine label
-        if (faculty_to_show == "__dashboard__") {
-          access_level <- faculty_info()$access_level
-          if (access_level == "department_leader") {
-            if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-              label <- paste0(input$selected_division, " Average")
-            } else {
-              label <- "All Divisions Average"
-            }
-          } else {
-            label <- "Division Average"
-          }
-        } else {
-          label <- "Your Scores"
-        }
-
-        create_spider_plot(individual_means(), all_means(), individual_label = label)
+        create_spider_plot(individual_means(), all_means(), individual_label = "Your Scores")
       }
     })
 
@@ -469,25 +327,7 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
             )
           )
       } else {
-        faculty_to_show <- display_faculty()
-
-        # Determine label
-        if (faculty_to_show == "__dashboard__") {
-          access_level <- faculty_info()$access_level
-          if (access_level == "department_leader") {
-            if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-              label <- input$selected_division
-            } else {
-              label <- "All Divisions"
-            }
-          } else {
-            label <- "Division"
-          }
-        } else {
-          label <- "Your Score"
-        }
-
-        create_comparison_bar_chart(comparison_data(), individual_label = label)
+        create_comparison_bar_chart(comparison_data(), individual_label = "Your Score")
       }
     })
 
@@ -504,123 +344,18 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       }
     })
 
-    # Faculty summary UI (only show in dashboard mode)
-    output$faculty_summary_ui <- renderUI({
-      req(faculty_info())
-
-      faculty_to_show <- display_faculty()
-
-      if (faculty_to_show == "__dashboard__") {
-        # Dashboard mode - show faculty summary table
-        fluidRow(
-          column(
-            width = 12,
-            box(
-              title = "Faculty Performance Summary",
-              width = 12,
-              status = "success",
-              solidHeader = TRUE,
-              collapsible = TRUE,
-              DT::dataTableOutput(ns("faculty_summary_table")),
-              tags$p(
-                class = "text-muted",
-                tags$small("Shows evaluation and assessment statistics for the current academic year. Evaluations Received = evaluations of this faculty member's teaching. Assessments Given = resident assessments conducted by this faculty member.")
-              )
-            )
-          )
-        )
-      } else {
-        # Individual mode - don't show summary table
-        return(NULL)
-      }
-    })
-
-    # Faculty summary table
-    output$faculty_summary_table <- DT::renderDataTable({
-      req(faculty_info(), display_faculty() == "__dashboard__")
-
-      access_level <- faculty_info()$access_level
-
-      # Determine which faculty to include
-      if (access_level == "department_leader") {
-        if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-          # Specific division
-          faculty_list <- faculty_data %>%
-            filter(archived == 0, fac_div == input$selected_division) %>%
-            pull(fac_name)
-        } else {
-          # All divisions
-          faculty_list <- faculty_info()$accessible_faculty
-        }
-      } else {
-        # Division admin
-        faculty_list <- faculty_info()$accessible_faculty
-      }
-
-      # Get current year setting
-      year <- if (input$time_filter == "current") "current" else "all"
-
-      # Create summary table
-      summary_data <- create_faculty_summary_table(
-        rdm_data$faculty_evaluation,
-        rdm_data$assessment,
-        faculty_list,
-        year
-      )
-
-      # Render datatable
-      datatable(
-        summary_data,
-        colnames = c(
-          "Faculty Name",
-          "Evaluations Received",
-          "Avg Overall Rating",
-          "Avg Time for Teaching",
-          "Assessments Given"
-        ),
-        options = list(
-          pageLength = 25,
-          order = list(list(1, 'desc')),  # Sort by evaluations received
-          dom = 'Bfrtip',
-          buttons = c('copy', 'csv', 'excel')
-        ),
-        rownames = FALSE
-      ) %>%
-        formatRound(columns = c("avg_overall", "avg_time_teaching"), digits = 2)
-    })
-
     # Plus feedback table
     output$plus_table <- DT::renderDataTable({
       faculty_to_show <- display_faculty()
-
-      if (faculty_to_show == "__dashboard__") {
-        # Dashboard mode - don't show individual feedback
-        datatable(
-          data.frame(Message = "Select an individual faculty member to view feedback"),
-          options = list(dom = 't'),
-          rownames = FALSE
-        )
-      } else {
-        feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
-        create_feedback_table(feedback$plus, "plus")
-      }
+      feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
+      create_feedback_table(feedback$plus, "plus")
     })
 
     # Delta feedback table
     output$delta_table <- DT::renderDataTable({
       faculty_to_show <- display_faculty()
-
-      if (faculty_to_show == "__dashboard__") {
-        # Dashboard mode - don't show individual feedback
-        datatable(
-          data.frame(Message = "Select an individual faculty member to view feedback"),
-          options = list(dom = 't'),
-          rownames = FALSE
-        )
-      } else {
-        feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
-        create_feedback_table(feedback$delta, "delta")
-      }
+      feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
+      create_feedback_table(feedback$delta, "delta")
     })
   })
 }
