@@ -136,7 +136,8 @@ mod_login_server <- function(id, faculty_data) {
       all_divisions <- NULL
 
       # Check if Department Leader (highest privilege)
-      if (!is.na(faculty_record$dep_lead) && faculty_record$dep_lead == "Yes") {
+      # dep_lead can be 1 (numeric) or "Yes" (string)
+      if (!is.na(faculty_record$dep_lead) && (faculty_record$dep_lead == 1 || faculty_record$dep_lead == "Yes")) {
         access_level <- "department_leader"
         # Get all unique divisions for selector
         all_divisions <- faculty_data %>%
@@ -144,7 +145,7 @@ mod_login_server <- function(id, faculty_data) {
           pull(fac_div) %>%
           unique() %>%
           sort()
-      } else if (!is.na(faculty_record$fac_admin) && faculty_record$fac_admin == "Yes") {
+      } else if (!is.na(faculty_record$fac_admin) && (faculty_record$fac_admin == 1 || faculty_record$fac_admin == "Yes")) {
         # Division admin - can see their specific division
         access_level <- "division_admin"
         accessible_divisions <- faculty_record$fac_div
