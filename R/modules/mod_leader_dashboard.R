@@ -20,11 +20,11 @@ mod_leader_dashboard_ui <- function(id) {
           fluidRow(
             # Division selector (for department leaders only)
             column(
-              width = 4,
+              width = 3,
               uiOutput(ns("division_selector_ui"))
             ),
             column(
-              width = 4,
+              width = 3,
               radioButtons(
                 ns("time_filter"),
                 "Time Period:",
@@ -36,8 +36,13 @@ mod_leader_dashboard_ui <- function(id) {
               )
             ),
             column(
-              width = 4,
+              width = 3,
               uiOutput(ns("dashboard_info"))
+            ),
+            column(
+              width = 3,
+              # Faculty drill-down selector
+              uiOutput(ns("faculty_drilldown_ui"))
             )
           )
         )
@@ -107,7 +112,10 @@ mod_leader_dashboard_ui <- function(id) {
           DT::dataTableOutput(ns("comparison_table"))
         )
       )
-    )
+    ),
+
+    # Feedback tables (only shown when faculty selected)
+    uiOutput(ns("feedback_tables_ui"))
   )
 }
 
@@ -152,6 +160,32 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       }
     })
 
+    # Faculty drill-down selector
+    output$faculty_drilldown_ui <- renderUI({
+      req(scoped_faculty())
+
+      selectizeInput(
+        ns("selected_faculty"),
+        "Drill Down to Faculty:",
+        choices = c("All Faculty (Aggregate)" = "__all__", setNames(scoped_faculty(), scoped_faculty())),
+        selected = "__all__",
+        multiple = TRUE,
+        options = list(
+          placeholder = 'Select faculty to view details',
+          plugins = list('remove_button')
+        )
+      )
+    })
+
+    # Determine which faculty to show (for drilldown)
+    display_faculty <- reactive({
+      if (is.null(input$selected_faculty) || "__all__" %in% input$selected_faculty) {
+        return("__all__")
+      } else {
+        return(input$selected_faculty)
+      }
+    })
+
     # Get faculty list for current scope
     scoped_faculty <- reactive({
       req(faculty_info())
@@ -174,12 +208,19 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       }
     })
 
-    # Filtered evaluation data for scoped faculty
+    # Filtered evaluation data for scoped faculty (or drilled-down faculty)
     scoped_evals <- reactive({
-      req(scoped_faculty())
+      faculty_to_filter <- display_faculty()
 
-      evals <- rdm_data$faculty_evaluation %>%
-        filter(fac_fell_name %in% scoped_faculty())
+      if (faculty_to_filter[1] == "__all__") {
+        # Show all faculty in scope (division/department)
+        evals <- rdm_data$faculty_evaluation %>%
+          filter(fac_fell_name %in% scoped_faculty())
+      } else {
+        # Show only selected faculty
+        evals <- rdm_data$faculty_evaluation %>%
+          filter(fac_fell_name %in% faculty_to_filter)
+      }
 
       # Apply time filter
       if (input$time_filter == "current") {
@@ -221,20 +262,30 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       current_year <- get_current_academic_year()
 
       # Determine scope description
-      if (access_level == "department_leader") {
-        if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-          # Convert code to label for display
-          scope_desc <- paste0("Division: ", get_division_label(input$selected_division))
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] != "__all__") {
+        # Specific faculty selected
+        if (length(faculty_to_show) == 1) {
+          scope_desc <- paste0("Individual: ", faculty_to_show[1])
         } else {
-          scope_desc <- "All Divisions (Department-Wide)"
+          scope_desc <- paste0("Selected Faculty (", length(faculty_to_show), " faculty)")
         }
       } else {
-        # Division admin - show label
-        div_label <- faculty_info()$accessible_divisions_label
-        if (is.null(div_label)) {
-          div_label <- get_division_label(faculty_info()$accessible_divisions)
+        # Aggregate view
+        if (access_level == "department_leader") {
+          if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+            scope_desc <- paste0("Division: ", get_division_label(input$selected_division))
+          } else {
+            scope_desc <- "All Divisions (Department-Wide)"
+          }
+        } else {
+          div_label <- faculty_info()$accessible_divisions_label
+          if (is.null(div_label)) {
+            div_label <- get_division_label(faculty_info()$accessible_divisions)
+          }
+          scope_desc <- paste0("Division: ", div_label)
         }
-        scope_desc <- paste0("Division: ", div_label)
       }
 
       time_info <- if (input$time_filter == "current") {
@@ -247,7 +298,6 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         class = "alert alert-info",
         icon("info-circle"),
         tags$strong(scope_desc), tags$br(),
-        tags$strong(n_faculty), " faculty, ",
         tags$strong(n_evals), " evaluations", tags$br(),
         time_info
       )
@@ -417,6 +467,110 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         )
       } else {
         create_eval_comparison_table(comparison_data())
+      }
+    })
+
+    # Feedback tables UI (only show when specific faculty selected)
+    output$feedback_tables_ui <- renderUI({
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] == "__all__") {
+        # Aggregate view - don't show feedback
+        return(NULL)
+      } else {
+        # Individual or multiple faculty selected - show feedback
+        fluidRow(
+          column(
+            width = 6,
+            box(
+              title = "Positive Feedback (Plus)",
+              width = 12,
+              status = "success",
+              solidHeader = TRUE,
+              collapsible = TRUE,
+              DT::dataTableOutput(ns("plus_table"))
+            )
+          ),
+          column(
+            width = 6,
+            box(
+              title = "Areas for Growth (Delta)",
+              width = 12,
+              status = "warning",
+              solidHeader = TRUE,
+              collapsible = TRUE,
+              DT::dataTableOutput(ns("delta_table"))
+            )
+          )
+        )
+      }
+    })
+
+    # Plus feedback table
+    output$plus_table <- DT::renderDataTable({
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] == "__all__") {
+        return(NULL)
+      }
+
+      # Get feedback for selected faculty
+      feedback_data <- scoped_evals() %>%
+        filter(!is.na(plus), plus != "") %>%
+        select(fac_fell_name, fac_eval_date, plus) %>%
+        arrange(desc(fac_eval_date))
+
+      if (nrow(feedback_data) == 0) {
+        datatable(
+          data.frame(Message = "No positive feedback available for selected faculty"),
+          options = list(dom = 't'),
+          rownames = FALSE
+        )
+      } else {
+        datatable(
+          feedback_data,
+          colnames = c("Faculty", "Date", "Positive Feedback"),
+          options = list(
+            pageLength = 10,
+            searching = TRUE,
+            order = list(list(1, 'desc'))
+          ),
+          rownames = FALSE
+        )
+      }
+    })
+
+    # Delta feedback table
+    output$delta_table <- DT::renderDataTable({
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] == "__all__") {
+        return(NULL)
+      }
+
+      # Get feedback for selected faculty
+      feedback_data <- scoped_evals() %>%
+        filter(!is.na(delta), delta != "") %>%
+        select(fac_fell_name, fac_eval_date, delta) %>%
+        arrange(desc(fac_eval_date))
+
+      if (nrow(feedback_data) == 0) {
+        datatable(
+          data.frame(Message = "No growth feedback available for selected faculty"),
+          options = list(dom = 't'),
+          rownames = FALSE
+        )
+      } else {
+        datatable(
+          feedback_data,
+          colnames = c("Faculty", "Date", "Areas for Growth"),
+          options = list(
+            pageLength = 10,
+            searching = TRUE,
+            order = list(list(1, 'desc'))
+          ),
+          rownames = FALSE
+        )
       }
     })
   })
