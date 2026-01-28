@@ -100,16 +100,38 @@ mod_leader_dashboard_ui <- function(id) {
       )
     ),
 
-    # Comparison table
+    # Comparison table (Primary Domains - 1-5 scale)
     fluidRow(
       column(
         width = 12,
         box(
-          title = "Detailed Score Comparison",
+          title = "Primary Evaluation Domains (1-5 Scale)",
           width = 12,
           status = "primary",
           solidHeader = TRUE,
-          DT::dataTableOutput(ns("comparison_table"))
+          DT::dataTableOutput(ns("comparison_table")),
+          tags$p(
+            class = "text-muted",
+            tags$small("These domains all use a 1-5 scale and are shown in the spider plot above.")
+          )
+        )
+      )
+    ),
+
+    # Secondary metrics table
+    fluidRow(
+      column(
+        width = 12,
+        box(
+          title = "Additional Metrics (Various Scales)",
+          width = 12,
+          status = "warning",
+          solidHeader = TRUE,
+          DT::dataTableOutput(ns("secondary_metrics_table")),
+          tags$p(
+            class = "text-muted",
+            tags$small("These metrics use different scales and are displayed separately from the primary domains.")
+          )
         )
       )
     ),
@@ -250,6 +272,16 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
     comparison_data <- reactive({
       req(nrow(scoped_evals()) >= MIN_EVALUATIONS)
       create_comparison_table(scoped_means(), all_means())
+    })
+
+    # Secondary metrics
+    scoped_secondary_metrics <- reactive({
+      req(nrow(scoped_evals()) >= MIN_EVALUATIONS)
+      calculate_secondary_metrics(scoped_evals(), faculty_name = NULL)
+    })
+
+    all_secondary_metrics <- reactive({
+      calculate_secondary_metrics(all_evals(), faculty_name = NULL)
     })
 
     # Dashboard info
@@ -467,6 +499,19 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         )
       } else {
         create_eval_comparison_table(comparison_data())
+      }
+    })
+
+    # Secondary metrics table
+    output$secondary_metrics_table <- DT::renderDataTable({
+      if (nrow(scoped_evals()) < MIN_EVALUATIONS) {
+        datatable(
+          data.frame(Message = "Minimum 5 evaluations required to display statistics"),
+          options = list(dom = 't'),
+          rownames = FALSE
+        )
+      } else {
+        create_secondary_metrics_table(scoped_secondary_metrics(), all_secondary_metrics())
       }
     })
 

@@ -8,13 +8,28 @@ library(lubridate)
 MIN_EVALUATIONS <- 5           # Minimum evals per period to display
 EVALUATION_DELAY_MONTHS <- 6   # Delay before showing evaluations
 
-# Evaluation domains to analyze
-EVAL_DOMAINS <- c(
-  "time_teaching",    # Ensures time for teaching (1-5)
-  "att_overall",      # Overall teaching rating (1-5)
-  "att_ext_tea",      # Extra teaching effort
-  "att_give_feed"     # Feedback quality
+# Primary evaluation domains (all on 1-5 scale) - used for spider plots and main comparisons
+PRIMARY_EVAL_DOMAINS <- c(
+  "approachability",    # How approachable is the attending/fellow to address questions or updates?
+  "respect",            # Is the attending/fellow respectful of all members of the healthcare team?
+  "bedside_manner",     # Does the attending/fellow role model a good bedside manner?
+  "time_teaching",      # Does the attending/fellow ensure time for teaching?
+  "ques_clin_des",      # Does the attending/fellow ask questions about your clinical decisions?
+  "autonomy",           # The attending/fellow allowed me autonomy in my clinical decision making
+  "provide_feedback",   # The attending/fellow provided me with feedback that allowed me to improve my performance (NOTE: verify field name)
+  "organized_session"   # The clinical session (or sessions) I had with the attending were conducted in an organized fashion? (NOTE: verify field name)
 )
+
+# Secondary metrics (different scales - NOT for spider plots)
+SECONDARY_METRICS <- c(
+  "att_overall",      # Overall teaching rating (different scale)
+  "att_ext_tea",      # Extra teaching effort (different scale)
+  "att_give_feed",    # Feedback type given (different scale)
+  "eval_done"         # Evaluation completion status (different scale)
+)
+
+# For backward compatibility - default to primary domains
+EVAL_DOMAINS <- PRIMARY_EVAL_DOMAINS
 
 # ==============================================================================
 # Filtering Functions
@@ -140,11 +155,11 @@ count_assessments_by_faculty <- function(assessment_data, faculty_list = NULL, y
 #'
 #' @param eval_data Faculty evaluation data
 #' @param faculty_name Faculty name to filter (if NULL, calculates for all)
-#' @param domains Vector of domain column names to calculate
+#' @param domains Vector of domain column names to calculate (default: PRIMARY_EVAL_DOMAINS)
 #' @return Data frame with domain names and mean scores
 calculate_faculty_eval_means <- function(eval_data,
                                           faculty_name = NULL,
-                                          domains = EVAL_DOMAINS) {
+                                          domains = PRIMARY_EVAL_DOMAINS) {
   # Filter by faculty if specified
   if (!is.null(faculty_name)) {
     eval_data <- eval_data %>%
@@ -178,9 +193,9 @@ calculate_faculty_eval_means <- function(eval_data,
 #' Calculate evaluation means for all faculty (for comparison)
 #'
 #' @param eval_data Faculty evaluation data
-#' @param domains Vector of domain column names to calculate
+#' @param domains Vector of domain column names to calculate (default: PRIMARY_EVAL_DOMAINS)
 #' @return Data frame with domain names and mean scores across all faculty
-calculate_all_faculty_means <- function(eval_data, domains = EVAL_DOMAINS) {
+calculate_all_faculty_means <- function(eval_data, domains = PRIMARY_EVAL_DOMAINS) {
   calculate_faculty_eval_means(
     eval_data = eval_data,
     faculty_name = NULL,  # NULL = all faculty
@@ -208,6 +223,42 @@ create_comparison_table <- function(individual_means, all_means) {
       difference = individual_score - all_score,
       percent_diff = round((difference / all_score) * 100, 1)
     )
+}
+
+#' Calculate secondary metrics (different scales from primary domains)
+#'
+#' @param eval_data Faculty evaluation data
+#' @param faculty_name Faculty name to filter (if NULL, calculates for all)
+#' @return Data frame with secondary metric statistics
+calculate_secondary_metrics <- function(eval_data, faculty_name = NULL) {
+  # Filter by faculty if specified
+  if (!is.null(faculty_name)) {
+    eval_data <- eval_data %>%
+      filter(fac_fell_name == faculty_name)
+  }
+
+  # Calculate statistics for each secondary metric
+  results <- tibble(
+    metric = character(),
+    mean_value = numeric(),
+    n = integer()
+  )
+
+  for (metric in SECONDARY_METRICS) {
+    if (metric %in% names(eval_data)) {
+      mean_val <- mean(eval_data[[metric]], na.rm = TRUE)
+      n_val <- sum(!is.na(eval_data[[metric]]))
+
+      results <- results %>%
+        add_row(
+          metric = metric,
+          mean_value = mean_val,
+          n = n_val
+        )
+    }
+  }
+
+  results
 }
 
 #' Get plus/delta feedback for a faculty member
@@ -283,14 +334,30 @@ create_faculty_summary_table <- function(faculty_eval_data, assessment_data, fac
 #' @param domain_name Column name
 #' @return Human-readable label
 get_domain_label <- function(domain_name) {
-  labels <- c(
+  # Primary evaluation domain labels (1-5 scale)
+  primary_labels <- c(
+    "approachability" = "Approachability",
+    "respect" = "Respectful of Healthcare Team",
+    "bedside_manner" = "Role Models Good Bedside Manner",
     "time_teaching" = "Ensures Time for Teaching",
-    "att_overall" = "Overall Teaching Quality",
-    "att_ext_tea" = "Extra Teaching Effort",
-    "att_give_feed" = "Quality of Feedback Given"
+    "ques_clin_des" = "Asks About Clinical Decisions",
+    "autonomy" = "Allows Autonomy in Decision Making",
+    "provide_feedback" = "Provides Feedback for Improvement",
+    "organized_session" = "Conducts Organized Sessions"
   )
 
-  ifelse(domain_name %in% names(labels), labels[domain_name], domain_name)
+  # Secondary metric labels (different scales)
+  secondary_labels <- c(
+    "att_overall" = "Overall Teaching Quality",
+    "att_ext_tea" = "Extra Teaching Effort",
+    "att_give_feed" = "Feedback Type Given",
+    "eval_done" = "Evaluation Completion"
+  )
+
+  # Combine all labels
+  all_labels <- c(primary_labels, secondary_labels)
+
+  ifelse(domain_name %in% names(all_labels), all_labels[domain_name], domain_name)
 }
 
 #' Add labels to evaluation results

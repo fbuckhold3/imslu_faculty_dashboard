@@ -201,6 +201,60 @@ create_feedback_table <- function(feedback_data, feedback_type = "plus") {
 }
 
 # ==============================================================================
+# Secondary Metrics Display
+# ==============================================================================
+
+#' Create table for secondary metrics (different scales from primary domains)
+#'
+#' @param individual_metrics Secondary metrics for individual faculty
+#' @param all_metrics Secondary metrics for all faculty
+#' @return DT::datatable object
+create_secondary_metrics_table <- function(individual_metrics, all_metrics) {
+  # Prepare data with labels
+  table_data <- individual_metrics %>%
+    rename(
+      individual_value = mean_value,
+      individual_n = n
+    ) %>%
+    left_join(
+      all_metrics %>%
+        select(metric, all_value = mean_value, all_n = n),
+      by = "metric"
+    ) %>%
+    mutate(
+      Metric = sapply(metric, get_domain_label),
+      `Your Score` = round(individual_value, 2),
+      `All Faculty` = round(all_value, 2),
+      Difference = round(individual_value - all_value, 2),
+      `Your N` = individual_n,
+      `All N` = all_n
+    ) %>%
+    select(Metric, `Your Score`, `All Faculty`, Difference, `Your N`, `All N`)
+
+  # Create datatable
+  datatable(
+    table_data,
+    options = list(
+      pageLength = 10,
+      searching = FALSE,
+      paging = FALSE,
+      info = FALSE,
+      columnDefs = list(
+        list(className = 'dt-center', targets = 1:5)
+      )
+    ),
+    rownames = FALSE
+  ) %>%
+    formatStyle(
+      'Difference',
+      backgroundColor = styleInterval(
+        cuts = c(-0.01, 0.01),
+        values = c('rgba(255, 99, 71, 0.3)', 'rgba(255, 255, 255, 0)', 'rgba(144, 238, 144, 0.3)')
+      )
+    )
+}
+
+# ==============================================================================
 # Summary Boxes
 # ==============================================================================
 
