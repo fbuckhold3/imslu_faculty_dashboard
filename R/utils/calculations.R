@@ -16,8 +16,8 @@ PRIMARY_EVAL_DOMAINS <- c(
   "time_teaching",      # Does the attending/fellow ensure time for teaching?
   "ques_clin_des",      # Does the attending/fellow ask questions about your clinical decisions?
   "autonomy",           # The attending/fellow allowed me autonomy in my clinical decision making
-  "provide_feedback",   # The attending/fellow provided me with feedback that allowed me to improve my performance (NOTE: verify field name)
-  "organized_session"   # The clinical session (or sessions) I had with the attending were conducted in an organized fashion? (NOTE: verify field name)
+  "feedback",           # The attending/fellow provided me with feedback that allowed me to improve my performance
+  "organ"               # The clinical session (or sessions) I had with the attending were conducted in an organized fashion?
 )
 
 # Secondary metrics (different scales - NOT for spider plots)
@@ -334,24 +334,24 @@ create_faculty_summary_table <- function(faculty_eval_data, assessment_data, fac
 #' @param domain_name Column name
 #' @return Human-readable label
 get_domain_label <- function(domain_name) {
-  # Primary evaluation domain labels (1-5 scale)
+  # Primary evaluation domain labels (1-5 scale) - shortened for clarity
   primary_labels <- c(
     "approachability" = "Approachability",
-    "respect" = "Respectful of Healthcare Team",
-    "bedside_manner" = "Role Models Good Bedside Manner",
-    "time_teaching" = "Ensures Time for Teaching",
-    "ques_clin_des" = "Asks About Clinical Decisions",
-    "autonomy" = "Allows Autonomy in Decision Making",
-    "provide_feedback" = "Provides Feedback for Improvement",
-    "organized_session" = "Conducts Organized Sessions"
+    "respect" = "Respectful to Team",
+    "bedside_manner" = "Bedside Manner",
+    "time_teaching" = "Time for Teaching",
+    "ques_clin_des" = "Questions Clinical Decisions",
+    "autonomy" = "Allows Autonomy",
+    "feedback" = "Actionable Feedback",
+    "organ" = "Organized Sessions"
   )
 
-  # Secondary metric labels (different scales)
+  # Secondary metric labels (different scales) - shortened for clarity
   secondary_labels <- c(
-    "att_overall" = "Overall Teaching Quality",
+    "att_overall" = "Overall Teaching",
     "att_ext_tea" = "Extra Teaching Effort",
-    "att_give_feed" = "Feedback Type Given",
-    "eval_done" = "Evaluation Completion"
+    "att_give_feed" = "Feedback Type",
+    "eval_done" = "Completed Evaluation"
   )
 
   # Combine all labels
