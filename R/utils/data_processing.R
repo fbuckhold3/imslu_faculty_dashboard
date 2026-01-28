@@ -127,21 +127,71 @@ load_test_data <- function() {
 # Division Label Mapping
 # ==============================================================================
 
+#' Download and cache division labels from REDCap data dictionary
+#'
+#' @return Named vector of division codes to labels
+get_division_mapping <- function() {
+  # Try to use cached mapping first (to avoid repeated API calls)
+  if (exists(".division_mapping_cache", envir = .GlobalEnv)) {
+    return(get(".division_mapping_cache", envir = .GlobalEnv))
+  }
+
+  # Download data dictionary from faculty database
+  data_dict <- REDCapR::redcap_metadata_read(
+    redcap_uri = Sys.getenv("REDCAP_URL"),
+    token = Sys.getenv("FACULTY_REDCAP_TOKEN")
+  )$data
+
+  # Find the fac_div field
+  fac_div_field <- data_dict %>%
+    filter(field_name == "fac_div")
+
+  if (nrow(fac_div_field) == 0) {
+    warning("fac_div field not found in data dictionary")
+    return(c())
+  }
+
+  # Parse the select_choices_or_calculations field
+  # Format is: "1, Label 1 | 2, Label 2 | 3, Label 3"
+  choices_string <- fac_div_field$select_choices_or_calculations
+
+  if (is.na(choices_string) || choices_string == "") {
+    warning("No choices found for fac_div field")
+    return(c())
+  }
+
+  # Split by pipe and parse each choice
+  choices <- strsplit(choices_string, "\\|")[[1]]
+  choices <- trimws(choices)
+
+  # Parse each choice into code and label
+  division_map <- sapply(choices, function(choice) {
+    parts <- strsplit(choice, ",")[[1]]
+    if (length(parts) >= 2) {
+      code <- trimws(parts[1])
+      label <- trimws(paste(parts[-1], collapse = ","))  # In case label contains commas
+      return(c(code = code, label = label))
+    }
+    return(c(code = NA, label = NA))
+  })
+
+  # Convert to named vector
+  division_map <- setNames(division_map["label", ], division_map["code", ])
+  division_map <- division_map[!is.na(names(division_map))]
+
+  # Cache for future use
+  assign(".division_mapping_cache", division_map, envir = .GlobalEnv)
+
+  return(division_map)
+}
+
 #' Get division label from numeric code
 #'
 #' @param division_code Numeric division code
 #' @return Division label string
 get_division_label <- function(division_code) {
-  # Mapping of division codes to labels
-  # Based on your fac_div field in REDCap
-  division_map <- c(
-    "3" = "Cardiology",
-    "5" = "Gastroenterology",
-    "7" = "GIM - Hospitalist",
-    "8" = "GIM - Primary Care",
-    "13" = "Pulmonary / Critical Care"
-    # Add other divisions as needed
-  )
+  # Get dynamic mapping from data dictionary
+  division_map <- get_division_mapping()
 
   # Convert to character for lookup
   code_str <- as.character(division_code)
