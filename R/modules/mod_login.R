@@ -139,16 +139,18 @@ mod_login_server <- function(id, faculty_data) {
       # dep_lead can be 1 (numeric) or "Yes" (string)
       if (!is.na(faculty_record$dep_lead) && (faculty_record$dep_lead == 1 || faculty_record$dep_lead == "Yes")) {
         access_level <- "department_leader"
-        # Get all unique divisions for selector
+        # Get all unique divisions with labels for selector
         all_divisions <- faculty_data %>%
           filter(archived == 0, !is.na(fac_div)) %>%
-          pull(fac_div) %>%
-          unique() %>%
-          sort()
+          select(fac_div) %>%
+          distinct() %>%
+          mutate(fac_div_label = sapply(fac_div, get_division_label)) %>%
+          arrange(fac_div_label)
       } else if (!is.na(faculty_record$fac_admin) && (faculty_record$fac_admin == 1 || faculty_record$fac_admin == "Yes")) {
         # Division admin - can see their specific division
         access_level <- "division_admin"
         accessible_divisions <- faculty_record$fac_div
+        accessible_divisions_label <- get_division_label(faculty_record$fac_div)
       }
 
       # Get list of faculty names this user can access
@@ -170,9 +172,11 @@ mod_login_server <- function(id, faculty_data) {
         fac_name = faculty_record$fac_name,
         fac_email = faculty_record$fac_email,
         fac_div = faculty_record$fac_div,
+        fac_div_label = get_division_label(faculty_record$fac_div),
         access_level = access_level,
         accessible_faculty = accessible_faculty,
         accessible_divisions = accessible_divisions,
+        accessible_divisions_label = if(exists("accessible_divisions_label")) accessible_divisions_label else NULL,
         all_divisions = all_divisions
       )
 
@@ -182,7 +186,8 @@ mod_login_server <- function(id, faculty_data) {
       access_description <- switch(
         access_level,
         "individual" = "Individual Dashboard",
-        "division_admin" = paste0("Division Leader Dashboard (", accessible_divisions, ")"),
+        "division_admin" = paste0("Division Leader Dashboard (",
+                                   if(!is.null(info$accessible_divisions_label)) info$accessible_divisions_label else accessible_divisions, ")"),
         "department_leader" = "Department Leader Dashboard (All Faculty & Divisions)"
       )
 

@@ -124,6 +124,48 @@ load_test_data <- function() {
 }
 
 # ==============================================================================
+# Division Label Mapping
+# ==============================================================================
+
+#' Get division label from numeric code
+#'
+#' @param division_code Numeric division code
+#' @return Division label string
+get_division_label <- function(division_code) {
+  # Mapping of division codes to labels
+  # Based on your fac_div field in REDCap
+  division_map <- c(
+    "3" = "Cardiology",
+    "5" = "Gastroenterology",
+    "7" = "GIM - Hospitalist",
+    "8" = "GIM - Primary Care",
+    "13" = "Pulmonary / Critical Care"
+    # Add other divisions as needed
+  )
+
+  # Convert to character for lookup
+  code_str <- as.character(division_code)
+
+  if (code_str %in% names(division_map)) {
+    return(division_map[code_str])
+  } else {
+    # Return code if no mapping found
+    return(paste0("Division ", code_str))
+  }
+}
+
+#' Add division labels to faculty data
+#'
+#' @param faculty_data Faculty data frame with fac_div column
+#' @return Faculty data with fac_div_label column added
+add_division_labels <- function(faculty_data) {
+  faculty_data %>%
+    mutate(
+      fac_div_label = sapply(fac_div, get_division_label)
+    )
+}
+
+# ==============================================================================
 # Data Cleaning Functions
 # ==============================================================================
 

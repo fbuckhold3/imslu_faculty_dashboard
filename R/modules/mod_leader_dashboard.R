@@ -122,23 +122,31 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       access_level <- faculty_info()$access_level
 
       if (access_level != "department_leader") {
-        # Division admins see their division name only (no selector)
+        # Division admins see their division label only (no selector)
+        div_label <- faculty_info()$accessible_divisions_label
+        if (is.null(div_label)) {
+          div_label <- get_division_label(faculty_info()$accessible_divisions)
+        }
+
         tags$div(
           tags$strong("Your Division:"),
           tags$p(class = "text-info", style = "font-size: 18px; margin-top: 10px;",
-                 faculty_info()$accessible_divisions)
+                 div_label)
         )
       } else {
-        # Department leaders get selector
-        all_divisions <- faculty_info()$all_divisions
+        # Department leaders get selector with labels
+        all_divisions_df <- faculty_info()$all_divisions
+
+        # Create choices: codes as values, labels as display names
+        division_choices <- c(
+          "All Divisions (Department-Wide)" = "__all__",
+          setNames(all_divisions_df$fac_div, all_divisions_df$fac_div_label)
+        )
 
         selectInput(
           ns("selected_division"),
           "Select Division:",
-          choices = c(
-            "All Divisions (Department-Wide)" = "__all__",
-            setNames(all_divisions, all_divisions)
-          ),
+          choices = division_choices,
           selected = "__all__"
         )
       }
@@ -215,12 +223,18 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       # Determine scope description
       if (access_level == "department_leader") {
         if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-          scope_desc <- paste0("Division: ", input$selected_division)
+          # Convert code to label for display
+          scope_desc <- paste0("Division: ", get_division_label(input$selected_division))
         } else {
           scope_desc <- "All Divisions (Department-Wide)"
         }
       } else {
-        scope_desc <- paste0("Division: ", faculty_info()$accessible_divisions)
+        # Division admin - show label
+        div_label <- faculty_info()$accessible_divisions_label
+        if (is.null(div_label)) {
+          div_label <- get_division_label(faculty_info()$accessible_divisions)
+        }
+        scope_desc <- paste0("Division: ", div_label)
       }
 
       time_info <- if (input$time_filter == "current") {
@@ -341,12 +355,18 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
 
         if (access_level == "department_leader") {
           if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-            label <- paste0(input$selected_division, " Average")
+            # Convert code to label for display
+            label <- paste0(get_division_label(input$selected_division), " Average")
           } else {
             label <- "Department Average"
           }
         } else {
-          label <- paste0(faculty_info()$accessible_divisions, " Average")
+          # Division admin - use label
+          div_label <- faculty_info()$accessible_divisions_label
+          if (is.null(div_label)) {
+            div_label <- get_division_label(faculty_info()$accessible_divisions)
+          }
+          label <- paste0(div_label, " Average")
         }
 
         create_spider_plot(scoped_means(), all_means(), individual_label = label)
@@ -369,12 +389,18 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
 
         if (access_level == "department_leader") {
           if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-            label <- input$selected_division
+            # Convert code to label for display
+            label <- get_division_label(input$selected_division)
           } else {
             label <- "Department"
           }
         } else {
-          label <- faculty_info()$accessible_divisions
+          # Division admin - use label
+          div_label <- faculty_info()$accessible_divisions_label
+          if (is.null(div_label)) {
+            div_label <- get_division_label(faculty_info()$accessible_divisions)
+          }
+          label <- div_label
         }
 
         create_comparison_bar_chart(comparison_data(), individual_label = label)
