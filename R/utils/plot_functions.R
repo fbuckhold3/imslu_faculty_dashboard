@@ -275,3 +275,126 @@ calculate_eval_summary <- function(eval_data) {
     delta_count = sum(!is.na(eval_data$delta) & eval_data$delta != "")
   )
 }
+
+# ==============================================================================
+# Conference Attendance Visualizations
+# ==============================================================================
+
+#' Create stacked bar chart for conference attendance over time
+#'
+#' @param attendance_data Data frame with week_label, rotation_name, attendance_count
+#' @param title Chart title
+#' @return Plotly object
+create_conference_attendance_chart <- function(attendance_data, title = "Conference Attendance - Last 4 Weeks") {
+  # Check if we have data
+  if (is.null(attendance_data) || nrow(attendance_data) == 0) {
+    return(
+      plotly_empty() %>%
+        layout(
+          title = "No conference attendance data available",
+          annotations = list(
+            text = "No attendance records found for the selected rotations",
+            showarrow = FALSE
+          )
+        )
+    )
+  }
+
+  # Create stacked bar chart
+  plot_ly(
+    data = attendance_data,
+    x = ~week_label,
+    y = ~attendance_count,
+    color = ~rotation_name,
+    type = "bar",
+    text = ~paste0(rotation_name, ": ", attendance_count),
+    hovertemplate = paste(
+      "<b>%{x}</b><br>",
+      "%{text}<br>",
+      "<extra></extra>"
+    )
+  ) %>%
+    layout(
+      title = title,
+      xaxis = list(
+        title = "",
+        categoryorder = "array",
+        categoryarray = c("3 Weeks Ago", "2 Weeks Ago", "1 Week Ago", "This Week")
+      ),
+      yaxis = list(
+        title = "Attendance Count"
+      ),
+      barmode = "stack",
+      legend = list(
+        title = list(text = "Rotation"),
+        orientation = "v",
+        x = 1.02,
+        y = 1
+      ),
+      hovermode = "closest"
+    ) %>%
+    config(displayModeBar = FALSE)
+}
+
+#' Create summary table for conference attendance
+#'
+#' @param weekly_data Data frame with weekly attendance
+#' @param yearly_data Data frame with academic year totals
+#' @return DT::datatable object
+create_conference_summary_table <- function(weekly_data, yearly_data) {
+  # If no data, return empty message
+  if ((is.null(weekly_data) || nrow(weekly_data) == 0) &&
+      (is.null(yearly_data) || nrow(yearly_data) == 0)) {
+    return(
+      datatable(
+        data.frame(Message = "No conference attendance data available"),
+        options = list(dom = 't'),
+        rownames = FALSE
+      )
+    )
+  }
+
+  # Aggregate weekly data by rotation
+  if (!is.null(weekly_data) && nrow(weekly_data) > 0) {
+    weekly_totals <- weekly_data %>%
+      group_by(rotation_name) %>%
+      summarize(last_4_weeks = sum(attendance_count), .groups = "drop")
+  } else {
+    weekly_totals <- tibble(rotation_name = character(), last_4_weeks = numeric())
+  }
+
+  # Get yearly totals
+  if (!is.null(yearly_data) && nrow(yearly_data) > 0) {
+    yearly_totals <- yearly_data %>%
+      select(rotation_name, academic_year = attendance_count)
+  } else {
+    yearly_totals <- tibble(rotation_name = character(), academic_year = numeric())
+  }
+
+  # Combine
+  summary_table <- full_join(weekly_totals, yearly_totals, by = "rotation_name") %>%
+    mutate(
+      last_4_weeks = replace_na(last_4_weeks, 0),
+      academic_year = replace_na(academic_year, 0)
+    ) %>%
+    rename(
+      Rotation = rotation_name,
+      `Last 4 Weeks` = last_4_weeks,
+      `Academic Year` = academic_year
+    )
+
+  # Create datatable
+  datatable(
+    summary_table,
+    options = list(
+      pageLength = 15,
+      searching = FALSE,
+      paging = FALSE,
+      info = FALSE,
+      columnDefs = list(
+        list(className = 'dt-center', targets = 1:2)
+      )
+    ),
+    rownames = FALSE
+  )
+}

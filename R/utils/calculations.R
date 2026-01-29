@@ -8,6 +8,43 @@ library(lubridate)
 MIN_EVALUATIONS <- 5           # Minimum evals per period to display
 EVALUATION_DELAY_MONTHS <- 6   # Delay before showing evaluations
 
+# ==============================================================================
+# Rotation Mapping Constants
+# ==============================================================================
+
+# Map rotation codes to rotation names and divisions
+# Based on q_rotation field from questions form
+ROTATION_MAPPING <- list(
+  # GIM - Hospitalist (fac_div = 7)
+  "1" = list(name = "Red Team", division = 7, label = "GIM - Hospitalist"),
+  "2" = list(name = "Green Team", division = 7, label = "GIM - Hospitalist"),
+  "3" = list(name = "White Team", division = 7, label = "GIM - Hospitalist"),
+  "5" = list(name = "Diamond Team", division = 7, label = "GIM - Hospitalist"),
+  "6" = list(name = "Gold Team", division = 7, label = "GIM - Hospitalist"),
+  "13" = list(name = "VA A", division = 7, label = "GIM - Hospitalist", va_only = TRUE),
+  "14" = list(name = "VA B", division = 7, label = "GIM - Hospitalist", va_only = TRUE),
+  "15" = list(name = "VA C", division = 7, label = "GIM - Hospitalist", va_only = TRUE),
+  "16" = list(name = "VA D", division = 7, label = "GIM - Hospitalist", va_only = TRUE),
+
+  # GIM - Primary Care (fac_div = 8)
+  "4" = list(name = "Yellow Team", division = 8, label = "GIM - Primary Care"),
+  "10" = list(name = "Bridge/Acute Care", division = 8, label = "GIM - Primary Care"),
+
+  # Pulmonary / Critical Care (fac_div = 13)
+  "7" = list(name = "MICU", division = 13, label = "Pulmonary/Critical Care"),
+
+  # Gastroenterology (fac_div = 5)
+  "8" = list(name = "Bronze Team", division = 5, label = "Gastroenterology"),
+
+  # Cardiology (fac_div = 3)
+  "9" = list(name = "Cardiology", division = 3, label = "Cardiology"),
+
+  # Other (less relevant per user feedback)
+  "11" = list(name = "Consults - SLUH", division = NA, label = "Other"),
+  "12" = list(name = "Elective/Clinics CSM", division = NA, label = "Other"),
+  "17" = list(name = "VA Clinics/Consults", division = NA, label = "Other", va_only = TRUE)
+)
+
 # Primary evaluation domains (all on 1-5 scale) - used for spider plots and main comparisons
 PRIMARY_EVAL_DOMAINS <- c(
   "approachability",    # How approachable is the attending/fellow to address questions or updates?
@@ -369,4 +406,190 @@ add_domain_labels <- function(eval_results) {
     mutate(
       domain_label = sapply(domain, get_domain_label)
     )
+}
+
+# ==============================================================================
+# Conference Attendance Functions
+# ==============================================================================
+
+#' Get rotation codes for a specific faculty division and clinical site
+#'
+#' @param faculty_division Division code (fac_div)
+#' @param faculty_clinical Clinical affiliate (fac_clin): "1" = SSM, "2" = VA
+#' @return Vector of rotation codes
+get_rotations_for_faculty <- function(faculty_division, faculty_clinical = "1") {
+  # Get all rotation codes that match the faculty's division
+  matching_rotations <- c()
+
+  for (rotation_code in names(ROTATION_MAPPING)) {
+    rotation_info <- ROTATION_MAPPING[[rotation_code]]
+
+    # Skip rotations without a division (consults/electives)
+    if (is.na(rotation_info$division)) {
+      next
+    }
+
+    # Check if division matches
+    if (rotation_info$division == faculty_division) {
+      # For VA rotations, only include if faculty is at VA
+      if (!is.null(rotation_info$va_only) && rotation_info$va_only) {
+        if (faculty_clinical == "2") {
+          matching_rotations <- c(matching_rotations, rotation_code)
+        }
+      } else {
+        # Non-VA rotation - include if faculty is at SSM
+        if (faculty_clinical == "1") {
+          matching_rotations <- c(matching_rotations, rotation_code)
+        }
+      }
+    }
+  }
+
+  return(matching_rotations)
+}
+
+#' Get rotation name from code
+#'
+#' @param rotation_code Rotation code as string or numeric
+#' @return Rotation name
+get_rotation_name <- function(rotation_code) {
+  code_str <- as.character(rotation_code)
+
+  if (code_str %in% names(ROTATION_MAPPING)) {
+    return(ROTATION_MAPPING[[code_str]]$name)
+  } else {
+    return(paste0("Rotation ", code_str))
+  }
+}
+
+#' Filter and aggregate conference attendance data
+#'
+#' @param questions_data Questions form data with q_date and q_rotation
+#' @param rotation_codes Vector of rotation codes to include
+#' @param weeks Number of weeks to look back (default: 4)
+#' @return Data frame with weekly attendance by rotation
+aggregate_conference_attendance <- function(questions_data, rotation_codes, weeks = 4) {
+  # Calculate date range (last N weeks)
+  end_date <- Sys.Date()
+  start_date <- end_date - lubridate::weeks(weeks)
+
+  # Handle numeric YYYYM date format from REDCap
+  if (is.numeric(questions_data$q_date)) {
+    # Convert YYYYM to date for filtering
+    questions_data <- questions_data %>%
+      mutate(
+        q_date_converted = lubridate::ymd(paste0(
+          floor(q_date / 100), "-",
+          sprintf("%02d", q_date %% 100), "-01"
+        ))
+      )
+    date_col <- "q_date_converted"
+  } else {
+    # Standard date format
+    questions_data <- questions_data %>%
+      mutate(q_date_converted = as.Date(q_date))
+    date_col <- "q_date_converted"
+  }
+
+  # Filter data
+  filtered_data <- questions_data %>%
+    filter(
+      !is.na(.data[[date_col]]),
+      .data[[date_col]] >= start_date,
+      .data[[date_col]] <= end_date,
+      as.character(q_rotation) %in% rotation_codes
+    )
+
+  # If no data, return empty structure
+  if (nrow(filtered_data) == 0) {
+    return(tibble(
+      week_label = character(),
+      rotation_code = character(),
+      rotation_name = character(),
+      attendance_count = numeric()
+    ))
+  }
+
+  # Assign week labels
+  filtered_data <- filtered_data %>%
+    mutate(
+      week_num = as.numeric(difftime(end_date, .data[[date_col]], units = "weeks")),
+      week_num = floor(week_num),
+      week_label = case_when(
+        week_num == 0 ~ "This Week",
+        week_num == 1 ~ "1 Week Ago",
+        week_num == 2 ~ "2 Weeks Ago",
+        week_num == 3 ~ "3 Weeks Ago",
+        TRUE ~ paste0(week_num, " Weeks Ago")
+      ),
+      rotation_code = as.character(q_rotation)
+    ) %>%
+    filter(week_num < weeks)  # Only include last N weeks
+
+  # Aggregate by week and rotation
+  aggregated <- filtered_data %>%
+    group_by(week_label, week_num, rotation_code) %>%
+    summarize(attendance_count = n(), .groups = "drop") %>%
+    mutate(rotation_name = sapply(rotation_code, get_rotation_name)) %>%
+    arrange(desc(week_num), rotation_code)
+
+  return(aggregated)
+}
+
+#' Calculate academic year total conference attendance
+#'
+#' @param questions_data Questions form data with q_date and q_rotation
+#' @param rotation_codes Vector of rotation codes to include
+#' @return Data frame with total attendance by rotation for current academic year
+aggregate_conference_academic_year <- function(questions_data, rotation_codes) {
+  # Get current academic year
+  current_year <- get_current_academic_year()
+
+  # Handle numeric YYYYM date format from REDCap
+  if (is.numeric(questions_data$q_date)) {
+    # Convert YYYYM to date for filtering
+    questions_data <- questions_data %>%
+      mutate(
+        q_date_converted = lubridate::ymd(paste0(
+          floor(q_date / 100), "-",
+          sprintf("%02d", q_date %% 100), "-01"
+        ))
+      )
+    date_col <- "q_date_converted"
+  } else {
+    # Standard date format
+    questions_data <- questions_data %>%
+      mutate(q_date_converted = as.Date(q_date))
+    date_col <- "q_date_converted"
+  }
+
+  # Add academic year column
+  questions_data <- questions_data %>%
+    mutate(academic_year = assign_academic_year(.data[[date_col]]))
+
+  # Filter for current academic year and relevant rotations
+  filtered_data <- questions_data %>%
+    filter(
+      academic_year == current_year,
+      as.character(q_rotation) %in% rotation_codes
+    ) %>%
+    mutate(rotation_code = as.character(q_rotation))
+
+  # If no data, return empty structure
+  if (nrow(filtered_data) == 0) {
+    return(tibble(
+      rotation_code = character(),
+      rotation_name = character(),
+      attendance_count = numeric()
+    ))
+  }
+
+  # Aggregate by rotation
+  aggregated <- filtered_data %>%
+    group_by(rotation_code) %>%
+    summarize(attendance_count = n(), .groups = "drop") %>%
+    mutate(rotation_name = sapply(rotation_code, get_rotation_name)) %>%
+    arrange(rotation_code)
+
+  return(aggregated)
 }

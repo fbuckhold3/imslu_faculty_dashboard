@@ -134,7 +134,39 @@ mod_leader_dashboard_ui <- function(id) {
     ),
 
     # Feedback tables (only shown when faculty selected)
-    uiOutput(ns("feedback_tables_ui"))
+    uiOutput(ns("feedback_tables_ui")),
+
+    # Conference Attendance
+    fluidRow(
+      column(
+        width = 8,
+        box(
+          title = "Conference Attendance - Last 4 Weeks",
+          width = 12,
+          status = "info",
+          solidHeader = TRUE,
+          collapsible = TRUE,
+          collapsed = TRUE,
+          plotlyOutput(ns("conference_chart"), height = "400px"),
+          tags$p(
+            class = "text-muted",
+            tags$small("Shows attendance at conferences for rotations in the selected division/department over the past 4 weeks.")
+          )
+        )
+      ),
+      column(
+        width = 4,
+        box(
+          title = "Conference Attendance Summary",
+          width = 12,
+          status = "info",
+          solidHeader = TRUE,
+          collapsible = TRUE,
+          collapsed = TRUE,
+          DT::dataTableOutput(ns("conference_summary"))
+        )
+      )
+    )
   )
 }
 
@@ -826,6 +858,94 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
           rownames = FALSE
         )
       }
+    })
+
+    # Conference attendance data
+    conference_rotations <- reactive({
+      req(faculty_info())
+
+      access_level <- faculty_info()$access_level
+      all_rotations <- c()
+
+      if (access_level == "department_leader") {
+        # Department leader - get all rotations or selected division's rotations
+        if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+          # Specific division selected
+          div_code <- as.numeric(input$selected_division)
+          # Get all faculty in this division to determine clinical site
+          div_faculty <- faculty_data %>%
+            filter(archived == 0, fac_div == div_code)
+
+          # Check if any are at VA
+          has_va <- any(div_faculty$fac_clin == "2", na.rm = TRUE)
+          has_ssm <- any(div_faculty$fac_clin == "1", na.rm = TRUE)
+
+          # Get rotations for this division
+          if (has_ssm) {
+            all_rotations <- c(all_rotations, get_rotations_for_faculty(div_code, "1"))
+          }
+          if (has_va) {
+            all_rotations <- c(all_rotations, get_rotations_for_faculty(div_code, "2"))
+          }
+        } else {
+          # All divisions - get all rotations
+          for (rotation_code in names(ROTATION_MAPPING)) {
+            rotation_info <- ROTATION_MAPPING[[rotation_code]]
+            if (!is.na(rotation_info$division)) {
+              all_rotations <- c(all_rotations, rotation_code)
+            }
+          }
+        }
+      } else {
+        # Division admin - get rotations for their division
+        fac_div <- faculty_info()$accessible_divisions
+        fac_clin <- faculty_info()$fac_clin %||% "1"  # Default to SSM if not specified
+
+        all_rotations <- get_rotations_for_faculty(fac_div, fac_clin)
+      }
+
+      return(unique(all_rotations))
+    })
+
+    conference_weekly_data <- reactive({
+      req(conference_rotations())
+
+      # Get questions data
+      questions_data <- rdm_data$questions
+
+      if (is.null(questions_data) || nrow(questions_data) == 0) {
+        return(NULL)
+      }
+
+      # Aggregate attendance for last 4 weeks
+      aggregate_conference_attendance(questions_data, conference_rotations(), weeks = 4)
+    })
+
+    conference_yearly_data <- reactive({
+      req(conference_rotations())
+
+      # Get questions data
+      questions_data <- rdm_data$questions
+
+      if (is.null(questions_data) || nrow(questions_data) == 0) {
+        return(NULL)
+      }
+
+      # Aggregate attendance for academic year
+      aggregate_conference_academic_year(questions_data, conference_rotations())
+    })
+
+    # Conference chart
+    output$conference_chart <- renderPlotly({
+      weekly_data <- conference_weekly_data()
+      create_conference_attendance_chart(weekly_data, "Conference Attendance - Last 4 Weeks")
+    })
+
+    # Conference summary table
+    output$conference_summary <- DT::renderDataTable({
+      weekly_data <- conference_weekly_data()
+      yearly_data <- conference_yearly_data()
+      create_conference_summary_table(weekly_data, yearly_data)
     })
   })
 }

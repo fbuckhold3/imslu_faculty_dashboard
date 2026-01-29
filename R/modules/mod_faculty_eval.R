@@ -136,6 +136,38 @@ mod_faculty_eval_ui <- function(id) {
           DT::dataTableOutput(ns("delta_table"))
         )
       )
+    ),
+
+    # Conference Attendance
+    fluidRow(
+      column(
+        width = 8,
+        box(
+          title = "Conference Attendance - Last 4 Weeks",
+          width = 12,
+          status = "info",
+          solidHeader = TRUE,
+          collapsible = TRUE,
+          collapsed = TRUE,
+          plotlyOutput(ns("conference_chart"), height = "400px"),
+          tags$p(
+            class = "text-muted",
+            tags$small("Shows attendance at conferences for rotations in your division over the past 4 weeks.")
+          )
+        )
+      ),
+      column(
+        width = 4,
+        box(
+          title = "Conference Attendance Summary",
+          width = 12,
+          status = "info",
+          solidHeader = TRUE,
+          collapsible = TRUE,
+          collapsed = TRUE,
+          DT::dataTableOutput(ns("conference_summary"))
+        )
+      )
     )
   )
 }
@@ -401,6 +433,60 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       faculty_to_show <- display_faculty()
       feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
       create_feedback_table(feedback$delta, "delta")
+    })
+
+    # Conference attendance data
+    conference_rotations <- reactive({
+      req(faculty_info())
+
+      # Get faculty division and clinical site
+      faculty_record <- faculty_info()
+      fac_div <- faculty_record$fac_div
+      fac_clin <- faculty_record$fac_clin
+
+      # Get rotations for this faculty's division
+      get_rotations_for_faculty(fac_div, fac_clin)
+    })
+
+    conference_weekly_data <- reactive({
+      req(conference_rotations())
+
+      # Get questions data
+      questions_data <- rdm_data$questions
+
+      if (is.null(questions_data) || nrow(questions_data) == 0) {
+        return(NULL)
+      }
+
+      # Aggregate attendance for last 4 weeks
+      aggregate_conference_attendance(questions_data, conference_rotations(), weeks = 4)
+    })
+
+    conference_yearly_data <- reactive({
+      req(conference_rotations())
+
+      # Get questions data
+      questions_data <- rdm_data$questions
+
+      if (is.null(questions_data) || nrow(questions_data) == 0) {
+        return(NULL)
+      }
+
+      # Aggregate attendance for academic year
+      aggregate_conference_academic_year(questions_data, conference_rotations())
+    })
+
+    # Conference chart
+    output$conference_chart <- renderPlotly({
+      weekly_data <- conference_weekly_data()
+      create_conference_attendance_chart(weekly_data, "Conference Attendance - Last 4 Weeks")
+    })
+
+    # Conference summary table
+    output$conference_summary <- DT::renderDataTable({
+      weekly_data <- conference_weekly_data()
+      yearly_data <- conference_yearly_data()
+      create_conference_summary_table(weekly_data, yearly_data)
     })
   })
 }
