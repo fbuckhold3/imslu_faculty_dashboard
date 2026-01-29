@@ -20,11 +20,16 @@ mod_leader_dashboard_ui <- function(id) {
           fluidRow(
             # Division selector (for department leaders only)
             column(
-              width = 4,
+              width = 3,
               uiOutput(ns("division_selector_ui"))
             ),
+            # Clinical site selector (for full oversight users only)
             column(
-              width = 4,
+              width = 3,
+              uiOutput(ns("clinical_site_selector_ui"))
+            ),
+            column(
+              width = 3,
               radioButtons(
                 ns("time_filter"),
                 "Time Period:",
@@ -36,7 +41,7 @@ mod_leader_dashboard_ui <- function(id) {
               )
             ),
             column(
-              width = 4,
+              width = 3,
               uiOutput(ns("dashboard_info"))
             )
           )
@@ -211,6 +216,28 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       }
     })
 
+    # Clinical site selector (only for full oversight users)
+    output$clinical_site_selector_ui <- renderUI({
+      req(faculty_info())
+
+      # Only show for department leaders with full oversight
+      if (faculty_info()$has_full_oversight) {
+        selectInput(
+          ns("selected_clinical_site"),
+          "Clinical Site:",
+          choices = c(
+            "All Sites" = "__all__",
+            "SSM" = "1",
+            "VA" = "2"
+          ),
+          selected = "__all__"
+        )
+      } else {
+        # No selector for users already filtered by site
+        NULL
+      }
+    })
+
     # Faculty drill-down selector
     output$faculty_drilldown_ui <- renderUI({
       req(scoped_faculty())
@@ -247,17 +274,27 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       access_level <- faculty_info()$access_level
 
       if (access_level == "department_leader") {
+        # Start with base faculty list
+        faculty_list <- faculty_data %>%
+          filter(archived == 0)
+
+        # Filter by division if selected
         if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-          # Specific division
-          faculty_data %>%
-            filter(archived == 0, fac_div == input$selected_division) %>%
-            pull(fac_name)
-        } else {
-          # All divisions
-          faculty_info()$accessible_faculty
+          faculty_list <- faculty_list %>%
+            filter(fac_div == input$selected_division)
         }
+
+        # Filter by clinical site if selected (full oversight users only)
+        if (faculty_info()$has_full_oversight &&
+            !is.null(input$selected_clinical_site) &&
+            input$selected_clinical_site != "__all__") {
+          faculty_list <- faculty_list %>%
+            filter(fac_clin == input$selected_clinical_site)
+        }
+
+        faculty_list %>% pull(fac_name)
       } else {
-        # Division admin
+        # Division admin - already filtered by site in login
         faculty_info()$accessible_faculty
       }
     })

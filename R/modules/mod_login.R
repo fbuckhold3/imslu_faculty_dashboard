@@ -155,12 +155,27 @@ mod_login_server <- function(id, faculty_data) {
 
       # Get list of faculty names this user can access
       if (access_level == "department_leader") {
-        accessible_faculty <- faculty_data %>%
-          filter(archived == 0) %>%
-          pull(fac_name)
+        # Department leaders see all faculty (filtered by their clinical site if specified)
+        # If fac_clin is NA or empty, they have full oversight (can see both VA and SSM)
+        if (!is.na(faculty_record$fac_clin) && faculty_record$fac_clin != "") {
+          # Filter to their clinical site only
+          accessible_faculty <- faculty_data %>%
+            filter(archived == 0, fac_clin == faculty_record$fac_clin) %>%
+            pull(fac_name)
+        } else {
+          # Full oversight - see all faculty
+          accessible_faculty <- faculty_data %>%
+            filter(archived == 0) %>%
+            pull(fac_name)
+        }
       } else if (access_level == "division_admin") {
+        # Division admins see their division, filtered by clinical site
         accessible_faculty <- faculty_data %>%
-          filter(archived == 0, fac_div == accessible_divisions) %>%
+          filter(
+            archived == 0,
+            fac_div == accessible_divisions,
+            fac_clin == faculty_record$fac_clin  # Same clinical site
+          ) %>%
           pull(fac_name)
       } else {
         accessible_faculty <- selected_name
@@ -173,11 +188,13 @@ mod_login_server <- function(id, faculty_data) {
         fac_email = faculty_record$fac_email,
         fac_div = faculty_record$fac_div,
         fac_div_label = get_division_label(faculty_record$fac_div),
+        fac_clin = faculty_record$fac_clin,  # Clinical site (1=SSM, 2=VA)
         access_level = access_level,
         accessible_faculty = accessible_faculty,
         accessible_divisions = accessible_divisions,
         accessible_divisions_label = if(exists("accessible_divisions_label")) accessible_divisions_label else NULL,
-        all_divisions = all_divisions
+        all_divisions = all_divisions,
+        has_full_oversight = (access_level == "department_leader" && (is.na(faculty_record$fac_clin) || faculty_record$fac_clin == ""))
       )
 
       faculty_info(info)
