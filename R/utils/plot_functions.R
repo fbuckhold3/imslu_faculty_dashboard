@@ -288,13 +288,25 @@ calculate_eval_summary <- function(eval_data) {
 create_conference_attendance_chart <- function(attendance_data, title = "Conference Attendance - Last 4 Weeks") {
   # Check if we have data
   if (is.null(attendance_data) || nrow(attendance_data) == 0) {
+    # Create empty plot with message
     return(
-      plotly_empty() %>%
+      plot_ly() %>%
         layout(
           title = "No conference attendance data available",
+          xaxis = list(visible = FALSE),
+          yaxis = list(visible = FALSE),
           annotations = list(
-            text = "No attendance records found for the selected rotations",
-            showarrow = FALSE
+            list(
+              text = "No attendance records found for the selected rotations in the last 4 weeks",
+              xref = "paper",
+              yref = "paper",
+              x = 0.5,
+              y = 0.5,
+              xanchor = "center",
+              yanchor = "middle",
+              showarrow = FALSE,
+              font = list(size = 14)
+            )
           )
         )
     )

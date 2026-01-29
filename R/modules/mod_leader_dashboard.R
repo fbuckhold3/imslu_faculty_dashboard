@@ -639,12 +639,23 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
     # Spider plot
     output$spider_plot <- renderPlotly({
       if (nrow(scoped_evals()) < MIN_EVALUATIONS) {
-        plotly_empty() %>%
+        plot_ly() %>%
           layout(
             title = "Insufficient data (minimum 5 evaluations required)",
+            xaxis = list(visible = FALSE),
+            yaxis = list(visible = FALSE),
             annotations = list(
-              text = "Not enough evaluations to display",
-              showarrow = FALSE
+              list(
+                text = "Not enough evaluations to display",
+                xref = "paper",
+                yref = "paper",
+                x = 0.5,
+                y = 0.5,
+                xanchor = "center",
+                yanchor = "middle",
+                showarrow = FALSE,
+                font = list(size = 14)
+              )
             )
           )
       } else {
@@ -696,12 +707,23 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
     # Bar chart
     output$bar_chart <- renderPlotly({
       if (nrow(scoped_evals()) < MIN_EVALUATIONS) {
-        plotly_empty() %>%
+        plot_ly() %>%
           layout(
             title = "Insufficient data",
+            xaxis = list(visible = FALSE),
+            yaxis = list(visible = FALSE),
             annotations = list(
-              text = "Not enough evaluations to display",
-              showarrow = FALSE
+              list(
+                text = "Not enough evaluations to display",
+                xref = "paper",
+                yref = "paper",
+                x = 0.5,
+                y = 0.5,
+                xanchor = "center",
+                yanchor = "middle",
+                showarrow = FALSE,
+                font = list(size = 14)
+              )
             )
           )
       } else {
