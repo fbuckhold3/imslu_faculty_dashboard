@@ -136,48 +136,71 @@ get_division_mapping <- function() {
     return(get(".division_mapping_cache", envir = .GlobalEnv))
   }
 
-  # Download data dictionary from faculty database
-  data_dict <- REDCapR::redcap_metadata_read(
-    redcap_uri = Sys.getenv("REDCAP_URL"),
-    token = Sys.getenv("FACULTY_REDCAP_TOKEN")
-  )$data
+  # Try to download data dictionary from faculty database
+  division_map <- tryCatch({
+    # Download metadata
+    metadata_result <- REDCapR::redcap_metadata_read(
+      redcap_uri = Sys.getenv("REDCAP_URL"),
+      token = Sys.getenv("FACULTY_REDCAP_TOKEN")
+    )
 
-  # Find the fac_div field
-  fac_div_field <- data_dict %>%
-    filter(field_name == "fac_div")
-
-  if (nrow(fac_div_field) == 0) {
-    warning("fac_div field not found in data dictionary")
-    return(c())
-  }
-
-  # Parse the select_choices_or_calculations field
-  # Format is: "1, Label 1 | 2, Label 2 | 3, Label 3"
-  choices_string <- fac_div_field$select_choices_or_calculations
-
-  if (is.na(choices_string) || choices_string == "") {
-    warning("No choices found for fac_div field")
-    return(c())
-  }
-
-  # Split by pipe and parse each choice
-  choices <- strsplit(choices_string, "\\|")[[1]]
-  choices <- trimws(choices)
-
-  # Parse each choice into code and label
-  division_map <- sapply(choices, function(choice) {
-    parts <- strsplit(choice, ",")[[1]]
-    if (length(parts) >= 2) {
-      code <- trimws(parts[1])
-      label <- trimws(paste(parts[-1], collapse = ","))  # In case label contains commas
-      return(c(code = code, label = label))
+    # Check if successful
+    if (!metadata_result$success || is.null(metadata_result$data) || nrow(metadata_result$data) == 0) {
+      warning("REDCap metadata read failed or returned no data. Using fallback division mapping.")
+      return(NULL)  # Will trigger fallback
     }
-    return(c(code = NA, label = NA))
+
+    data_dict <- metadata_result$data
+
+    # Find the fac_div field
+    fac_div_field <- data_dict %>%
+      filter(field_name == "fac_div")
+
+    if (nrow(fac_div_field) == 0) {
+      warning("fac_div field not found in data dictionary. Using fallback division mapping.")
+      return(NULL)  # Will trigger fallback
+    }
+
+    # Parse the select_choices_or_calculations field
+    # Format is: "1, Label 1 | 2, Label 2 | 3, Label 3"
+    choices_string <- fac_div_field$select_choices_or_calculations
+
+    if (is.na(choices_string) || choices_string == "") {
+      warning("No choices found for fac_div field. Using fallback division mapping.")
+      return(NULL)  # Will trigger fallback
+    }
+
+    # Split by pipe and parse each choice
+    choices <- strsplit(choices_string, "\\|")[[1]]
+    choices <- trimws(choices)
+
+    # Parse each choice into code and label
+    parsed_map <- sapply(choices, function(choice) {
+      parts <- strsplit(choice, ",")[[1]]
+      if (length(parts) >= 2) {
+        code <- trimws(parts[1])
+        label <- trimws(paste(parts[-1], collapse = ","))  # In case label contains commas
+        return(c(code = code, label = label))
+      }
+      return(c(code = NA, label = NA))
+    })
+
+    # Convert to named vector
+    final_map <- setNames(parsed_map["label", ], parsed_map["code", ])
+    final_map <- final_map[!is.na(names(final_map))]
+
+    return(final_map)
+
+  }, error = function(e) {
+    warning(paste("Error reading REDCap metadata:", e$message, "Using fallback division mapping."))
+    return(NULL)
   })
 
-  # Convert to named vector
-  division_map <- setNames(division_map["label", ], division_map["code", ])
-  division_map <- division_map[!is.na(names(division_map))]
+  # If metadata read failed, use a basic fallback
+  if (is.null(division_map) || length(division_map) == 0) {
+    # Fallback: just return empty for now - divisions will show as "Division X"
+    division_map <- c()
+  }
 
   # Cache for future use
   assign(".division_mapping_cache", division_map, envir = .GlobalEnv)
