@@ -73,31 +73,15 @@ mod_leader_dashboard_ui <- function(id) {
       valueBoxOutput(ns("total_assessments"), width = 3)
     ),
 
-    # Faculty summary table
-    fluidRow(
-      column(
-        width = 12,
-        box(
-          title = "Faculty Performance Summary",
-          width = 12,
-          status = "success",
-          solidHeader = TRUE,
-          collapsible = TRUE,
-          DT::dataTableOutput(ns("faculty_summary_table")),
-          tags$p(
-            class = "text-muted",
-            tags$small("Shows evaluation and assessment statistics for the selected scope. ", tags$strong("Click on any row"), " to automatically select that faculty member for detailed drill-down. Evaluations Received = evaluations of this faculty member's teaching. Assessments Given = resident assessments conducted by this faculty member.")
-          )
-        )
-      )
-    ),
+    # Faculty summary table (only shown in aggregate view)
+    uiOutput(ns("faculty_summary_table_ui")),
 
     # Visualizations
     fluidRow(
       column(
         width = 6,
         box(
-          title = "Division/Department Comparison - Spider Plot",
+          title = uiOutput(ns("spider_plot_title")),
           width = 12,
           status = "info",
           solidHeader = TRUE,
@@ -107,7 +91,7 @@ mod_leader_dashboard_ui <- function(id) {
       column(
         width = 6,
         box(
-          title = "Division/Department Comparison - Bar Chart",
+          title = uiOutput(ns("bar_chart_title")),
           width = 12,
           status = "info",
           solidHeader = TRUE,
@@ -121,15 +105,12 @@ mod_leader_dashboard_ui <- function(id) {
       column(
         width = 12,
         box(
-          title = "Primary Evaluation Domains (1-5 Scale)",
+          title = uiOutput(ns("comparison_table_title")),
           width = 12,
           status = "primary",
           solidHeader = TRUE,
           DT::dataTableOutput(ns("comparison_table")),
-          tags$p(
-            class = "text-muted",
-            tags$small("These domains all use a 1-5 scale and are shown in the spider plot above.")
-          )
+          uiOutput(ns("comparison_table_help"))
         )
       )
     ),
@@ -276,10 +257,22 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       rdm_data$faculty_evaluation
     })
 
-    # Calculate aggregate means for scoped faculty
+    # Calculate means for scoped faculty or individual if selected
     scoped_means <- reactive({
       req(nrow(scoped_evals()) >= MIN_EVALUATIONS)
-      calculate_faculty_eval_means(scoped_evals(), faculty_name = NULL)
+
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] == "__all__") {
+        # Aggregate view - calculate means across all scoped faculty
+        calculate_faculty_eval_means(scoped_evals(), faculty_name = NULL)
+      } else if (length(faculty_to_show) == 1) {
+        # Single faculty selected - calculate individual means
+        calculate_faculty_eval_means(scoped_evals(), faculty_name = faculty_to_show[1])
+      } else {
+        # Multiple faculty selected - calculate aggregate for selected group
+        calculate_faculty_eval_means(scoped_evals(), faculty_name = NULL)
+      }
     })
 
     # Calculate department-wide means
@@ -296,7 +289,19 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
     # Secondary metrics
     scoped_secondary_metrics <- reactive({
       req(nrow(scoped_evals()) >= MIN_EVALUATIONS)
-      calculate_secondary_metrics(scoped_evals(), faculty_name = NULL)
+
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] == "__all__") {
+        # Aggregate view
+        calculate_secondary_metrics(scoped_evals(), faculty_name = NULL)
+      } else if (length(faculty_to_show) == 1) {
+        # Single faculty selected
+        calculate_secondary_metrics(scoped_evals(), faculty_name = faculty_to_show[1])
+      } else {
+        # Multiple faculty selected - aggregate
+        calculate_secondary_metrics(scoped_evals(), faculty_name = NULL)
+      }
     })
 
     all_secondary_metrics <- reactive({
@@ -356,20 +361,52 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
 
     # Value boxes
     output$total_faculty <- renderValueBox({
-      n <- length(scoped_faculty())
-      valueBox(
-        n,
-        "Faculty Members",
-        icon = icon("user-tie"),
-        color = "blue"
-      )
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] == "__all__") {
+        # Aggregate view - show count
+        n <- length(scoped_faculty())
+        valueBox(
+          n,
+          "Faculty Members",
+          icon = icon("user-tie"),
+          color = "blue"
+        )
+      } else if (length(faculty_to_show) == 1) {
+        # Individual view - show faculty name
+        valueBox(
+          icon("user"),
+          faculty_to_show[1],
+          icon = icon("user-tie"),
+          color = "blue"
+        )
+      } else {
+        # Multiple selected
+        n <- length(faculty_to_show)
+        valueBox(
+          n,
+          "Selected Faculty",
+          icon = icon("user-tie"),
+          color = "blue"
+        )
+      }
     })
 
     output$total_evals <- renderValueBox({
       n <- nrow(scoped_evals())
+      faculty_to_show <- display_faculty()
+
+      label <- if (faculty_to_show[1] == "__all__") {
+        "Total Evaluations"
+      } else if (length(faculty_to_show) == 1) {
+        "Evaluations Received"
+      } else {
+        "Total Evaluations"
+      }
+
       valueBox(
         n,
-        "Total Evaluations",
+        label,
         icon = icon("clipboard-check"),
         color = "green"
       )
@@ -391,20 +428,72 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
 
     output$total_assessments <- renderValueBox({
       year <- if (input$time_filter == "current") "current" else "all"
+      faculty_to_show <- display_faculty()
 
-      assessment_counts <- count_assessments_by_faculty(
-        rdm_data$assessment,
-        scoped_faculty(),
-        year
-      )
+      if (faculty_to_show[1] == "__all__") {
+        # Aggregate - all scoped faculty
+        assessment_counts <- count_assessments_by_faculty(
+          rdm_data$assessment,
+          scoped_faculty(),
+          year
+        )
+        n <- sum(assessment_counts$assessment_count)
+        label <- "Assessments Given"
+      } else if (length(faculty_to_show) == 1) {
+        # Individual faculty
+        assessment_counts <- count_assessments_by_faculty(
+          rdm_data$assessment,
+          faculty_to_show,
+          year
+        )
+        n <- sum(assessment_counts$assessment_count)
+        label <- "Assessments Given"
+      } else {
+        # Multiple faculty
+        assessment_counts <- count_assessments_by_faculty(
+          rdm_data$assessment,
+          faculty_to_show,
+          year
+        )
+        n <- sum(assessment_counts$assessment_count)
+        label <- "Assessments Given"
+      }
 
-      n <- sum(assessment_counts$assessment_count)
       valueBox(
         n,
-        "Assessments Given",
+        label,
         icon = icon("clipboard-list"),
         color = "purple"
       )
+    })
+
+    # Faculty summary table UI (conditional)
+    output$faculty_summary_table_ui <- renderUI({
+      faculty_to_show <- display_faculty()
+
+      # Only show table in aggregate view
+      if (faculty_to_show[1] == "__all__") {
+        fluidRow(
+          column(
+            width = 12,
+            box(
+              title = "Faculty Performance Summary",
+              width = 12,
+              status = "success",
+              solidHeader = TRUE,
+              collapsible = TRUE,
+              DT::dataTableOutput(ns("faculty_summary_table")),
+              tags$p(
+                class = "text-muted",
+                tags$small("Shows evaluation and assessment statistics for the selected scope. ", tags$strong("Click on any row"), " to automatically select that faculty member for detailed drill-down. Evaluations Received = evaluations of this faculty member's teaching. Assessments Given = resident assessments conducted by this faculty member.")
+              )
+            )
+          )
+        )
+      } else {
+        # Individual view - don't show summary table
+        NULL
+      }
     })
 
     # Faculty summary table
@@ -467,6 +556,17 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
       }
     })
 
+    # Spider plot title
+    output$spider_plot_title <- renderUI({
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] != "__all__" && length(faculty_to_show) == 1) {
+        "Faculty vs Department Comparison - Spider Plot"
+      } else {
+        "Division/Department Comparison - Spider Plot"
+      }
+    })
+
     # Spider plot
     output$spider_plot <- renderPlotly({
       if (nrow(scoped_evals()) < MIN_EVALUATIONS) {
@@ -479,25 +579,48 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
             )
           )
       } else {
-        access_level <- faculty_info()$access_level
+        faculty_to_show <- display_faculty()
 
-        if (access_level == "department_leader") {
-          if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-            # Convert code to label for display
-            label <- paste0(get_division_label(input$selected_division), " Average")
-          } else {
-            label <- "Department Average"
-          }
+        # Determine label based on what's being displayed
+        if (faculty_to_show[1] != "__all__" && length(faculty_to_show) == 1) {
+          # Single faculty selected - show their name
+          label <- faculty_to_show[1]
+        } else if (faculty_to_show[1] != "__all__") {
+          # Multiple faculty selected
+          label <- paste0("Selected Faculty (", length(faculty_to_show), ")")
         } else {
-          # Division admin - use label
-          div_label <- faculty_info()$accessible_divisions_label
-          if (is.null(div_label)) {
-            div_label <- get_division_label(faculty_info()$accessible_divisions)
+          # Aggregate view - use division/department label
+          access_level <- faculty_info()$access_level
+
+          if (access_level == "department_leader") {
+            if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+              # Convert code to label for display
+              label <- paste0(get_division_label(input$selected_division), " Average")
+            } else {
+              label <- "Department Average"
+            }
+          } else {
+            # Division admin - use label
+            div_label <- faculty_info()$accessible_divisions_label
+            if (is.null(div_label)) {
+              div_label <- get_division_label(faculty_info()$accessible_divisions)
+            }
+            label <- paste0(div_label, " Average")
           }
-          label <- paste0(div_label, " Average")
         }
 
         create_spider_plot(scoped_means(), all_means(), individual_label = label)
+      }
+    })
+
+    # Bar chart title
+    output$bar_chart_title <- renderUI({
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] != "__all__" && length(faculty_to_show) == 1) {
+        "Faculty vs Department Comparison - Bar Chart"
+      } else {
+        "Division/Department Comparison - Bar Chart"
       }
     })
 
@@ -513,25 +636,65 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
             )
           )
       } else {
-        access_level <- faculty_info()$access_level
+        faculty_to_show <- display_faculty()
 
-        if (access_level == "department_leader") {
-          if (!is.null(input$selected_division) && input$selected_division != "__all__") {
-            # Convert code to label for display
-            label <- get_division_label(input$selected_division)
-          } else {
-            label <- "Department"
-          }
+        # Determine label based on what's being displayed
+        if (faculty_to_show[1] != "__all__" && length(faculty_to_show) == 1) {
+          # Single faculty selected - show their name (shortened for bar chart)
+          label <- faculty_to_show[1]
+        } else if (faculty_to_show[1] != "__all__") {
+          # Multiple faculty selected
+          label <- "Selected Faculty"
         } else {
-          # Division admin - use label
-          div_label <- faculty_info()$accessible_divisions_label
-          if (is.null(div_label)) {
-            div_label <- get_division_label(faculty_info()$accessible_divisions)
+          # Aggregate view - use division/department label
+          access_level <- faculty_info()$access_level
+
+          if (access_level == "department_leader") {
+            if (!is.null(input$selected_division) && input$selected_division != "__all__") {
+              # Convert code to label for display
+              label <- get_division_label(input$selected_division)
+            } else {
+              label <- "Department"
+            }
+          } else {
+            # Division admin - use label
+            div_label <- faculty_info()$accessible_divisions_label
+            if (is.null(div_label)) {
+              div_label <- get_division_label(faculty_info()$accessible_divisions)
+            }
+            label <- div_label
           }
-          label <- div_label
         }
 
         create_comparison_bar_chart(comparison_data(), individual_label = label)
+      }
+    })
+
+    # Comparison table title
+    output$comparison_table_title <- renderUI({
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] != "__all__" && length(faculty_to_show) == 1) {
+        "Primary Evaluation Domains (1-5 Scale) - Individual Comparison"
+      } else {
+        "Primary Evaluation Domains (1-5 Scale)"
+      }
+    })
+
+    # Comparison table help text
+    output$comparison_table_help <- renderUI({
+      faculty_to_show <- display_faculty()
+
+      if (faculty_to_show[1] != "__all__" && length(faculty_to_show) == 1) {
+        tags$p(
+          class = "text-muted",
+          tags$small("These domains all use a 1-5 scale. Comparing this faculty member against the department average.")
+        )
+      } else {
+        tags$p(
+          class = "text-muted",
+          tags$small("These domains all use a 1-5 scale and are shown in the spider plot above.")
+        )
       }
     })
 
