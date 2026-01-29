@@ -20,11 +20,11 @@ mod_leader_dashboard_ui <- function(id) {
           fluidRow(
             # Division selector (for department leaders only)
             column(
-              width = 3,
+              width = 4,
               uiOutput(ns("division_selector_ui"))
             ),
             column(
-              width = 3,
+              width = 4,
               radioButtons(
                 ns("time_filter"),
                 "Time Period:",
@@ -36,14 +36,30 @@ mod_leader_dashboard_ui <- function(id) {
               )
             ),
             column(
-              width = 3,
+              width = 4,
               uiOutput(ns("dashboard_info"))
-            ),
-            column(
-              width = 3,
-              # Faculty drill-down selector
-              uiOutput(ns("faculty_drilldown_ui"))
             )
+          )
+        )
+      )
+    ),
+
+    # Faculty drill-down selector (prominent)
+    fluidRow(
+      column(
+        width = 12,
+        box(
+          title = "Faculty Drill-Down",
+          width = 12,
+          status = "warning",
+          solidHeader = TRUE,
+          collapsible = TRUE,
+          collapsed = FALSE,
+          uiOutput(ns("faculty_drilldown_ui")),
+          tags$p(
+            class = "text-info",
+            style = "margin-top: 10px;",
+            tags$strong("Tip:"), " Select one or more faculty members to view their detailed evaluation data, or click on a faculty name in the summary table below."
           )
         )
       )
@@ -70,7 +86,7 @@ mod_leader_dashboard_ui <- function(id) {
           DT::dataTableOutput(ns("faculty_summary_table")),
           tags$p(
             class = "text-muted",
-            tags$small("Shows evaluation and assessment statistics for the selected scope. Click on a faculty name to view their individual dashboard. Evaluations Received = evaluations of this faculty member's teaching. Assessments Given = resident assessments conducted by this faculty member.")
+            tags$small("Shows evaluation and assessment statistics for the selected scope. ", tags$strong("Click on any row"), " to automatically select that faculty member for detailed drill-down. Evaluations Received = evaluations of this faculty member's teaching. Assessments Given = resident assessments conducted by this faculty member.")
           )
         )
       )
@@ -186,15 +202,18 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
     output$faculty_drilldown_ui <- renderUI({
       req(scoped_faculty())
 
-      selectizeInput(
-        ns("selected_faculty"),
-        "Drill Down to Faculty:",
-        choices = c("All Faculty (Aggregate)" = "__all__", setNames(scoped_faculty(), scoped_faculty())),
-        selected = "__all__",
-        multiple = TRUE,
-        options = list(
-          placeholder = 'Select faculty to view details',
-          plugins = list('remove_button')
+      tags$div(
+        style = "font-size: 16px;",
+        selectizeInput(
+          ns("selected_faculty"),
+          tags$strong("Select Faculty Member(s):"),
+          choices = c("All Faculty (Aggregate)" = "__all__", setNames(scoped_faculty(), scoped_faculty())),
+          selected = "__all__",
+          multiple = TRUE,
+          options = list(
+            placeholder = 'Type to search or click on a faculty name in the table below...',
+            plugins = list('remove_button')
+          )
         )
       )
     })
@@ -410,6 +429,7 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
           "Avg Time for Teaching",
           "Assessments Given"
         ),
+        selection = 'single',  # Enable single row selection
         options = list(
           pageLength = 25,
           order = list(list(1, 'desc')),
@@ -419,6 +439,32 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         rownames = FALSE
       ) %>%
         formatRound(columns = c("avg_overall", "avg_time_teaching"), digits = 2)
+    })
+
+    # Observer: When a row is clicked in the faculty summary table, update the faculty selector
+    observeEvent(input$faculty_summary_table_rows_selected, {
+      req(scoped_faculty())
+      selected_row <- input$faculty_summary_table_rows_selected
+
+      if (!is.null(selected_row) && length(selected_row) > 0) {
+        year <- if (input$time_filter == "current") "current" else "all"
+        summary_data <- create_faculty_summary_table(
+          rdm_data$faculty_evaluation,
+          rdm_data$assessment,
+          scoped_faculty(),
+          year
+        )
+
+        # Get the faculty name from the selected row
+        selected_faculty_name <- summary_data$fac_fell_name[selected_row]
+
+        # Update the selectizeInput
+        updateSelectizeInput(
+          session,
+          "selected_faculty",
+          selected = selected_faculty_name
+        )
+      }
     })
 
     # Spider plot

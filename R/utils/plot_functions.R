@@ -180,10 +180,14 @@ create_feedback_table <- function(feedback_data, feedback_type = "plus") {
 
   table_data <- feedback_data %>%
     mutate(
-      Date = as.character(fac_eval_date),
+      Year = if_else(
+        is.na(fac_eval_date),
+        "Unknown",
+        assign_academic_year(fac_eval_date)
+      ),
       Feedback = .data[[text_col]]
     ) %>%
-    select(Date, Feedback)
+    select(Year, Feedback)
 
   # Create table
   datatable(
@@ -192,7 +196,7 @@ create_feedback_table <- function(feedback_data, feedback_type = "plus") {
       pageLength = 10,
       searching = TRUE,
       paging = TRUE,
-      order = list(list(0, 'desc'))  # Sort by date descending
+      order = list(list(0, 'desc'))  # Sort by year descending
     ),
     rownames = FALSE,
     class = 'cell-border stripe',
