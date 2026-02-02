@@ -1,6 +1,7 @@
 library(REDCapR)
 library(tidyverse)
 library(lubridate)
+library(httr)
 
 # ==============================================================================
 # REDCap Data Download Functions
@@ -16,75 +17,92 @@ download_faculty_data <- function() {
   return(result$data)
 }
 
-# Download RDM data - focused on only the forms we need
-# Downloads all forms in ONE call for speed (vs 5 separate calls)
-download_rdm_focused <- function() {
-  cat("Downloading RDM data (all needed forms in one call)...\n")
-  
-  # Download all forms at once - MUCH faster!
-  all_data <- REDCapR::redcap_read(
-    redcap_uri = Sys.getenv("REDCAP_URL"),
-    token = Sys.getenv("RDM_REDCAP_TOKEN"),
-    forms = c("assessment", "faculty_evaluation", "s_eval", "questions", "resident_data")
-  )$data
-  
-  cat("Separating forms...\n")
-  
-  # Separate by form completion fields
-  # Each form has a corresponding "_complete" field
-  assessment <- all_data %>%
-    filter(!is.na(assessment_complete)) %>%
-    select(-c(faculty_evaluation_complete, s_eval_complete, 
-              questions_complete, resident_data_complete))
-  
-  faculty_eval <- all_data %>%
-    filter(!is.na(faculty_evaluation_complete)) %>%
-    select(-c(assessment_complete, s_eval_complete, 
-              questions_complete, resident_data_complete))
-  
-  s_eval <- all_data %>%
-    filter(!is.na(s_eval_complete)) %>%
-    select(-c(assessment_complete, faculty_evaluation_complete, 
-              questions_complete, resident_data_complete))
-  
-  questions <- all_data %>%
-    filter(!is.na(questions_complete)) %>%
-    select(-c(assessment_complete, faculty_evaluation_complete, 
-              s_eval_complete, resident_data_complete))
-  
+# Download RDM data - using direct POST to request specific forms
+download_rdm_focused <- function(faculty_data = NULL) {
+  cat("Downloading RDM database (specific forms)...\n")
+
+  # Use direct httr::POST for cleaner form filtering
+  # rawOrLabel='raw' keeps data as-is (no conversion to display labels)
+  formData <- list(
+    "token" = Sys.getenv("RDM_REDCAP_TOKEN"),
+    content = 'record',
+    action = 'export',
+    format = 'csv',
+    type = 'flat',
+    csvDelimiter = '',
+    'forms[0]' = 'resident_data',
+    'forms[1]' = 'assessment',
+    'forms[2]' = 'faculty_evaluation',
+    'forms[3]' = 's_eval',
+    'forms[4]' = 'ilp',
+    'forms[5]' = 'questions',
+    rawOrLabel = 'raw',
+    rawOrLabelHeaders = 'raw',
+    exportCheckboxLabel = 'false',
+    exportSurveyFields = 'false',
+    exportDataAccessGroups = 'false'
+  )
+
+  response <- httr::POST(Sys.getenv("REDCAP_URL"), body = formData, encode = "form")
+  # Get raw text content and parse with readr::read_csv with better settings
+  raw_text <- httr::content(response, as = "text", encoding = "UTF-8")
+  all_data <- readr::read_csv(raw_text, show_col_types = FALSE, guess_max = 5000)
+
+  cat("✓ Downloaded", nrow(all_data), "total records\n")
+  cat("Separating forms by redcap_repeat_instrument field...\n")
+
+  # Separate by repeating instrument field
+  # For base records: redcap_repeat_instrument is NA or empty
+  # For repeating records: redcap_repeat_instrument has the form name
+
   resident_data <- all_data %>%
-    filter(!is.na(resident_data_complete)) %>%
-    select(-c(assessment_complete, faculty_evaluation_complete, 
-              s_eval_complete, questions_complete))
-  
+    filter(is.na(redcap_repeat_instrument) | redcap_repeat_instrument == "")
+
+  assessment <- all_data %>%
+    filter(redcap_repeat_instrument == "assessment")
+
+  faculty_eval <- all_data %>%
+    filter(redcap_repeat_instrument == "faculty_evaluation")
+
+  s_eval <- all_data %>%
+    filter(redcap_repeat_instrument == "s_eval")
+
+  ilp <- all_data %>%
+    filter(redcap_repeat_instrument == "ilp")
+
+  questions <- all_data %>%
+    filter(redcap_repeat_instrument == "questions")
+
   cat("✓ Forms separated:\n")
+  cat("  • resident_data:", nrow(resident_data), "rows\n")
   cat("  • assessment:", nrow(assessment), "rows\n")
   cat("  • faculty_evaluation:", nrow(faculty_eval), "rows\n")
   cat("  • s_eval:", nrow(s_eval), "rows\n")
+  cat("  • ilp:", nrow(ilp), "rows\n")
   cat("  • questions:", nrow(questions), "rows\n")
-  cat("  • resident_data:", nrow(resident_data), "rows\n")
-  
+
   # Return as named list
   list(
+    resident_data = resident_data,
     assessment = assessment,
     faculty_evaluation = faculty_eval,
     s_eval = s_eval,
-    questions = questions,
-    resident_data = resident_data
+    ilp = ilp,
+    questions = questions
   )
 }
 
 # Save data locally for testing (avoids hitting API repeatedly during development)
 save_test_data <- function() {
   cat("\n=== Saving test data for offline development ===\n")
-  
+
   faculty_data <- download_faculty_data()
   rdm_data <- download_rdm_focused()
-  
+
   # Save as RDS files
   saveRDS(faculty_data, "data/faculty_test.rds")
   saveRDS(rdm_data, "data/rdm_test.rds")
-  
+
   cat("\n✓ Data saved successfully!\n")
   cat("  - data/faculty_test.rds:", nrow(faculty_data), "rows\n")
   cat("  - data/rdm_test.rds: List with", length(rdm_data), "forms\n")
@@ -106,6 +124,121 @@ load_test_data <- function() {
 }
 
 # ==============================================================================
+# Division Label Mapping
+# ==============================================================================
+
+#' Download and cache division labels from REDCap data dictionary
+#'
+#' @return Named vector of division codes to labels
+get_division_mapping <- function() {
+  # Try to use cached mapping first (to avoid repeated API calls)
+  if (exists(".division_mapping_cache", envir = .GlobalEnv)) {
+    return(get(".division_mapping_cache", envir = .GlobalEnv))
+  }
+
+  # Try to download data dictionary from faculty database
+  division_map <- tryCatch({
+    # Download metadata
+    metadata_result <- REDCapR::redcap_metadata_read(
+      redcap_uri = Sys.getenv("REDCAP_URL"),
+      token = Sys.getenv("FACULTY_REDCAP_TOKEN")
+    )
+
+    # Check if successful
+    if (!metadata_result$success || is.null(metadata_result$data) || nrow(metadata_result$data) == 0) {
+      warning("REDCap metadata read failed or returned no data. Using fallback division mapping.")
+      return(NULL)  # Will trigger fallback
+    }
+
+    data_dict <- metadata_result$data
+
+    # Find the fac_div field
+    fac_div_field <- data_dict %>%
+      filter(field_name == "fac_div")
+
+    if (nrow(fac_div_field) == 0) {
+      warning("fac_div field not found in data dictionary. Using fallback division mapping.")
+      return(NULL)  # Will trigger fallback
+    }
+
+    # Parse the select_choices_or_calculations field
+    # Format is: "1, Label 1 | 2, Label 2 | 3, Label 3"
+    choices_string <- fac_div_field$select_choices_or_calculations
+
+    if (is.na(choices_string) || choices_string == "") {
+      warning("No choices found for fac_div field. Using fallback division mapping.")
+      return(NULL)  # Will trigger fallback
+    }
+
+    # Split by pipe and parse each choice
+    choices <- strsplit(choices_string, "\\|")[[1]]
+    choices <- trimws(choices)
+
+    # Parse each choice into code and label
+    parsed_map <- sapply(choices, function(choice) {
+      parts <- strsplit(choice, ",")[[1]]
+      if (length(parts) >= 2) {
+        code <- trimws(parts[1])
+        label <- trimws(paste(parts[-1], collapse = ","))  # In case label contains commas
+        return(c(code = code, label = label))
+      }
+      return(c(code = NA, label = NA))
+    })
+
+    # Convert to named vector
+    final_map <- setNames(parsed_map["label", ], parsed_map["code", ])
+    final_map <- final_map[!is.na(names(final_map))]
+
+    return(final_map)
+
+  }, error = function(e) {
+    warning(paste("Error reading REDCap metadata:", e$message, "Using fallback division mapping."))
+    return(NULL)
+  })
+
+  # If metadata read failed, use a basic fallback
+  if (is.null(division_map) || length(division_map) == 0) {
+    # Fallback: just return empty for now - divisions will show as "Division X"
+    division_map <- c()
+  }
+
+  # Cache for future use
+  assign(".division_mapping_cache", division_map, envir = .GlobalEnv)
+
+  return(division_map)
+}
+
+#' Get division label from numeric code
+#'
+#' @param division_code Numeric division code
+#' @return Division label string
+get_division_label <- function(division_code) {
+  # Get dynamic mapping from data dictionary
+  division_map <- get_division_mapping()
+
+  # Convert to character for lookup
+  code_str <- as.character(division_code)
+
+  if (code_str %in% names(division_map)) {
+    return(division_map[code_str])
+  } else {
+    # Return code if no mapping found
+    return(paste0("Division ", code_str))
+  }
+}
+
+#' Add division labels to faculty data
+#'
+#' @param faculty_data Faculty data frame with fac_div column
+#' @return Faculty data with fac_div_label column added
+add_division_labels <- function(faculty_data) {
+  faculty_data %>%
+    mutate(
+      fac_div_label = sapply(fac_div, get_division_label)
+    )
+}
+
+# ==============================================================================
 # Data Cleaning Functions
 # ==============================================================================
 
@@ -122,14 +255,20 @@ assign_academic_year <- function(date_vector) {
   # Assign academic year based on date
   # July-June year definition
   # Return academic year labels (e.g., "2024-2025")
-  
-  if (is.character(date_vector)) {
-    date_vector <- as.Date(date_vector)
+
+  # Handle different date formats
+  if (is.numeric(date_vector)) {
+    # REDCap stores dates as numeric YYYYM format (e.g., 20251 = 2025 January)
+    year_val <- floor(date_vector / 100)
+    month_val <- date_vector %% 100
+  } else {
+    if (is.character(date_vector)) {
+      date_vector <- as.Date(date_vector)
+    }
+    year_val <- lubridate::year(date_vector)
+    month_val <- lubridate::month(date_vector)
   }
-  
-  year_val <- lubridate::year(date_vector)
-  month_val <- lubridate::month(date_vector)
-  
+
   # If July or later, academic year starts this year
   # Otherwise, academic year started last year
   ifelse(
