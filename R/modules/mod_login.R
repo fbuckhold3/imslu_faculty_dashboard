@@ -3,6 +3,15 @@
 # - Individual: Regular faculty see only their own data
 # - Division Admin: Faculty with fac_admin == "Yes" see their division
 # - Department Leader: Faculty with dep_lead == "Yes" see all faculty/divisions
+#
+# Set PRODUCTION_MODE=TRUE environment variable to disable testing dropdown
+
+# Check if in production mode
+is_production_mode <- function() {
+
+  prod_mode <- Sys.getenv("PRODUCTION_MODE", "FALSE")
+  return(toupper(prod_mode) %in% c("TRUE", "1", "YES"))
+}
 
 mod_login_ui <- function(id) {
   ns <- NS(id)
@@ -17,23 +26,8 @@ mod_login_ui <- function(id) {
         status = "primary",
         solidHeader = TRUE,
 
-        # Testing mode: Select faculty from dropdown
-        # Production mode: Enter access code
-        selectInput(
-          ns("faculty_select"),
-          "Select Faculty (Testing Mode):",
-          choices = NULL,  # Populated in server
-          selected = NULL
-        ),
-
-        hr(),
-
-        # Access code input (for production)
-        textInput(
-          ns("access_code"),
-          "Or Enter Access Code:",
-          placeholder = "Enter your unique access code"
-        ),
+        # Dynamic UI based on production mode
+        uiOutput(ns("login_form")),
 
         actionButton(
           ns("login_btn"),
@@ -55,25 +49,67 @@ mod_login_server <- function(id, faculty_data) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # Populate faculty dropdown (for testing)
-    observe({
-      faculty_choices <- faculty_data %>%
-        filter(archived == 0) %>%  # Only active faculty
-        arrange(fac_name) %>%
-        pull(fac_name)
-
-      # Set Fred Buckhold as default
-      default_faculty <- "Fred Buckhold"
-      if (!(default_faculty %in% faculty_choices)) {
-        default_faculty <- faculty_choices[1]  # Fallback if Fred not found
+    # Render login form based on mode
+    output$login_form <- renderUI({
+      if (is_production_mode()) {
+        # Production mode: access code only
+        tagList(
+          tags$p(
+            class = "text-muted",
+            "Enter your unique access code to view your dashboard."
+          ),
+          textInput(
+            ns("access_code"),
+            "Access Code:",
+            placeholder = "Enter your unique access code"
+          )
+        )
+      } else {
+        # Testing mode: dropdown + access code
+        tagList(
+          tags$div(
+            class = "alert alert-info",
+            icon("flask"),
+            tags$strong(" Testing Mode"),
+            tags$br(),
+            tags$small("Faculty dropdown is enabled for testing. Set PRODUCTION_MODE=TRUE to disable.")
+          ),
+          selectInput(
+            ns("faculty_select"),
+            "Select Faculty (Testing Only):",
+            choices = NULL
+          ),
+          hr(),
+          textInput(
+            ns("access_code"),
+            "Or Enter Access Code:",
+            placeholder = "Enter your unique access code"
+          )
+        )
       }
+    })
 
-      updateSelectInput(
-        session,
-        "faculty_select",
-        choices = c("", faculty_choices),
-        selected = default_faculty
-      )
+    # Populate faculty dropdown (for testing mode only)
+    observe({
+      if (!is_production_mode()) {
+        faculty_choices <- faculty_data %>%
+          filter(archived == 0) %>%
+          arrange(fac_name) %>%
+          pull(fac_name)
+
+        # Set Fred Buckhold as default
+        default_faculty <- "Fred Buckhold"
+        if (!(default_faculty %in% faculty_choices)) {
+          default_faculty <- faculty_choices[1]
+        }
+
+        updateSelectInput(
+          session,
+          "faculty_select",
+          choices = c("", faculty_choices),
+          selected = default_faculty
+        )
+      }
     })
 
     # Reactive to store faculty info after login
@@ -81,11 +117,10 @@ mod_login_server <- function(id, faculty_data) {
 
     # Handle login
     observeEvent(input$login_btn, {
-      # Try access code first, then dropdown
       selected_name <- NULL
 
+      # Try access code first
       if (!is.null(input$access_code) && input$access_code != "") {
-        # Production mode: validate access code
         match <- faculty_data %>%
           filter(fac_access == input$access_code)
 
@@ -101,7 +136,7 @@ mod_login_server <- function(id, faculty_data) {
           })
           return()
         }
-      } else if (!is.null(input$faculty_select) && input$faculty_select != "") {
+      } else if (!is_production_mode() && !is.null(input$faculty_select) && input$faculty_select != "") {
         # Testing mode: use dropdown selection
         selected_name <- input$faculty_select
       } else {
@@ -109,7 +144,11 @@ mod_login_server <- function(id, faculty_data) {
           tags$div(
             class = "alert alert-warning",
             icon("exclamation-triangle"),
-            " Please select a faculty member or enter an access code."
+            if (is_production_mode()) {
+              " Please enter your access code."
+            } else {
+              " Please select a faculty member or enter an access code."
+            }
           )
         })
         return()
@@ -136,10 +175,8 @@ mod_login_server <- function(id, faculty_data) {
       all_divisions <- NULL
 
       # Check if Department Leader (highest privilege)
-      # dep_lead can be 1 (numeric) or "Yes" (string)
       if (!is.na(faculty_record$dep_lead) && (faculty_record$dep_lead == 1 || faculty_record$dep_lead == "Yes")) {
         access_level <- "department_leader"
-        # Get all unique divisions with labels for selector
         all_divisions <- faculty_data %>%
           filter(archived == 0, !is.na(fac_div)) %>%
           select(fac_div) %>%
@@ -147,7 +184,7 @@ mod_login_server <- function(id, faculty_data) {
           mutate(fac_div_label = sapply(fac_div, get_division_label)) %>%
           arrange(fac_div_label)
       } else if (!is.na(faculty_record$fac_admin) && (faculty_record$fac_admin == 1 || faculty_record$fac_admin == "Yes")) {
-        # Division admin - can see their specific division
+        # Division admin
         access_level <- "division_admin"
         accessible_divisions <- faculty_record$fac_div
         accessible_divisions_label <- get_division_label(faculty_record$fac_div)
@@ -155,26 +192,21 @@ mod_login_server <- function(id, faculty_data) {
 
       # Get list of faculty names this user can access
       if (access_level == "department_leader") {
-        # Department leaders see all faculty (filtered by their clinical site if specified)
-        # If fac_clin is NA or empty, they have full oversight (can see both VA and SSM)
         if (!is.na(faculty_record$fac_clin) && faculty_record$fac_clin != "") {
-          # Filter to their clinical site only
           accessible_faculty <- faculty_data %>%
             filter(archived == 0, fac_clin == faculty_record$fac_clin) %>%
             pull(fac_name)
         } else {
-          # Full oversight - see all faculty
           accessible_faculty <- faculty_data %>%
             filter(archived == 0) %>%
             pull(fac_name)
         }
       } else if (access_level == "division_admin") {
-        # Division admins see their division, filtered by clinical site
         accessible_faculty <- faculty_data %>%
           filter(
             archived == 0,
             fac_div == accessible_divisions,
-            fac_clin == faculty_record$fac_clin  # Same clinical site
+            fac_clin == faculty_record$fac_clin
           ) %>%
           pull(fac_name)
       } else {
@@ -188,7 +220,7 @@ mod_login_server <- function(id, faculty_data) {
         fac_email = faculty_record$fac_email,
         fac_div = faculty_record$fac_div,
         fac_div_label = get_division_label(faculty_record$fac_div),
-        fac_clin = faculty_record$fac_clin,  # Clinical site (1=SSM, 2=VA)
+        fac_clin = faculty_record$fac_clin,
         access_level = access_level,
         accessible_faculty = accessible_faculty,
         accessible_divisions = accessible_divisions,
@@ -221,7 +253,6 @@ mod_login_server <- function(id, faculty_data) {
       })
     })
 
-    # Return faculty_info reactive
     return(faculty_info)
   })
 }
