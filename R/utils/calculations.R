@@ -593,3 +593,123 @@ aggregate_conference_academic_year <- function(questions_data, rotation_codes) {
 
   return(aggregated)
 }
+
+# ==============================================================================
+# Assessment Count Functions (Faculty evaluating residents)
+# ==============================================================================
+
+#' Count assessments completed by a specific faculty member
+#'
+#' @param assessment_data Assessment form data
+#' @param faculty_name Faculty name to filter by (NULL for all faculty)
+#' @param academic_year "current", "all", or specific year like "2024-2025"
+#' @return Integer count of assessments
+count_faculty_assessments <- function(assessment_data, faculty_name = NULL, academic_year = "current") {
+  if (is.null(assessment_data) || nrow(assessment_data) == 0) {
+    return(0)
+  }
+
+  # Filter by faculty if specified
+  if (!is.null(faculty_name)) {
+    assessment_data <- assessment_data %>%
+      filter(ass_faculty == faculty_name)
+  }
+
+  # Filter by academic year
+  if (academic_year != "all" && "ass_date" %in% names(assessment_data)) {
+    assessment_data <- filter_by_academic_year(assessment_data, "ass_date", academic_year)
+  }
+
+  nrow(assessment_data)
+}
+
+#' Get assessment counts for all faculty
+#'
+#' @param assessment_data Assessment form data
+#' @param faculty_list Optional vector of faculty names to include
+#' @param academic_year "current", "all", or specific year
+#' @return Data frame with faculty_name, assessment_count, sorted by count descending
+get_all_faculty_assessment_counts <- function(assessment_data, faculty_list = NULL, academic_year = "current") {
+  if (is.null(assessment_data) || nrow(assessment_data) == 0) {
+    return(tibble(
+      faculty_name = character(),
+      assessment_count = integer(),
+      academic_year = character()
+    ))
+  }
+
+  # Filter by academic year first
+  if (academic_year != "all" && "ass_date" %in% names(assessment_data)) {
+    assessment_data <- filter_by_academic_year(assessment_data, "ass_date", academic_year)
+  }
+
+  # Filter to valid faculty entries
+  assessment_data <- assessment_data %>%
+    filter(!is.na(ass_faculty) & ass_faculty != "")
+
+  # Filter to specific faculty list if provided
+  if (!is.null(faculty_list)) {
+    assessment_data <- assessment_data %>%
+      filter(ass_faculty %in% faculty_list)
+  }
+
+  # Count by faculty
+  counts <- assessment_data %>%
+    count(ass_faculty, name = "assessment_count") %>%
+    rename(faculty_name = ass_faculty) %>%
+    arrange(desc(assessment_count))
+
+  # Add academic year label
+  year_label <- if (academic_year == "current") {
+    get_current_academic_year()
+  } else if (academic_year == "all") {
+    "All Time"
+  } else {
+    academic_year
+  }
+
+  counts$academic_year <- year_label
+
+  counts
+}
+
+#' Get assessment statistics for a faculty member compared to peers
+#'
+#' @param assessment_data Assessment form data
+#' @param faculty_name Faculty name
+#' @param peer_faculty_list Vector of peer faculty names for comparison
+#' @param academic_year "current", "all", or specific year
+#' @return List with individual count, peer mean, peer median, rank
+get_faculty_assessment_stats <- function(assessment_data, faculty_name, peer_faculty_list = NULL, academic_year = "current") {
+  # Get individual count
+  individual_count <- count_faculty_assessments(assessment_data, faculty_name, academic_year)
+
+  # Get all counts for comparison
+  all_counts <- get_all_faculty_assessment_counts(assessment_data, peer_faculty_list, academic_year)
+
+  if (nrow(all_counts) == 0) {
+    return(list(
+      individual_count = individual_count,
+      peer_mean = NA,
+      peer_median = NA,
+      rank = NA,
+      total_faculty = 0
+    ))
+  }
+
+  # Calculate stats
+  peer_mean <- mean(all_counts$assessment_count, na.rm = TRUE)
+  peer_median <- median(all_counts$assessment_count, na.rm = TRUE)
+
+  # Find rank (1 = most assessments)
+  rank <- which(all_counts$faculty_name == faculty_name)
+  if (length(rank) == 0) rank <- NA else rank <- rank[1]
+
+  list(
+    individual_count = individual_count,
+    peer_mean = round(peer_mean, 1),
+    peer_median = peer_median,
+    rank = rank,
+    total_faculty = nrow(all_counts)
+  )
+}

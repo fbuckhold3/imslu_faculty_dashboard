@@ -345,7 +345,7 @@ create_conference_attendance_chart <- function(attendance_data, title = "Confere
       ),
       hovermode = "closest"
     ) %>%
-    config(displayModeBar = FALSE)
+    plotly::config(displayModeBar = FALSE)
 }
 
 #' Create summary table for conference attendance

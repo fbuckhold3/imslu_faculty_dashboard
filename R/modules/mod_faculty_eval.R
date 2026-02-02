@@ -1,12 +1,20 @@
-# Faculty Evaluation Module (Simplified)
-# Displays individual faculty evaluation data with filtering and visualizations
-# Leaders can select which faculty member to view
+# Faculty Evaluation Module
+# Displays the logged-in faculty member's OWN evaluation data only
+# Leaders use the Leadership Dashboard to view other faculty
 
 mod_faculty_eval_ui <- function(id) {
   ns <- NS(id)
 
   tagList(
-    # Filter controls
+    # Prominent header showing the logged-in faculty member's name
+    fluidRow(
+      column(
+        width = 12,
+        uiOutput(ns("faculty_header"))
+      )
+    ),
+
+    # Filter controls (time period only - no faculty selector)
     fluidRow(
       column(
         width = 12,
@@ -18,13 +26,8 @@ mod_faculty_eval_ui <- function(id) {
           collapsible = TRUE,
 
           fluidRow(
-            # Faculty selector (for leaders to select individual faculty)
             column(
-              width = 4,
-              uiOutput(ns("faculty_selector_ui"))
-            ),
-            column(
-              width = 4,
+              width = 6,
               radioButtons(
                 ns("time_filter"),
                 "Time Period:",
@@ -32,11 +35,12 @@ mod_faculty_eval_ui <- function(id) {
                   "Current Academic Year" = "current",
                   "All Time" = "all"
                 ),
-                selected = "current"
+                selected = "current",
+                inline = TRUE
               )
             ),
             column(
-              width = 4,
+              width = 6,
               uiOutput(ns("filter_info"))
             )
           )
@@ -44,12 +48,31 @@ mod_faculty_eval_ui <- function(id) {
       )
     ),
 
-    # Summary value boxes
+    # Summary value boxes - Evaluations received
     fluidRow(
       valueBoxOutput(ns("total_evals"), width = 3),
       valueBoxOutput(ns("avg_overall"), width = 3),
       valueBoxOutput(ns("avg_time_teaching"), width = 3),
       valueBoxOutput(ns("plus_count"), width = 3)
+    ),
+
+    # Assessments completed section
+    fluidRow(
+      column(
+        width = 12,
+        box(
+          title = "My Resident Assessments Completed",
+          width = 12,
+          status = "success",
+          solidHeader = TRUE,
+          collapsible = TRUE,
+          fluidRow(
+            valueBoxOutput(ns("my_assessments_count"), width = 4),
+            valueBoxOutput(ns("assessments_vs_mean"), width = 4),
+            valueBoxOutput(ns("assessments_rank"), width = 4)
+          )
+        )
+      )
     ),
 
     # Visualizations
@@ -176,49 +199,33 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
-    # Show faculty selector for leaders
-    output$faculty_selector_ui <- renderUI({
+    # Prominent header showing the logged-in faculty member's name
+    output$faculty_header <- renderUI({
       req(faculty_info())
 
-      access_level <- faculty_info()$access_level
+      logged_in_name <- faculty_info()$fac_name
 
-      if (access_level == "individual") {
-        # Regular faculty - no selector, show message
-        tags$div(
-          tags$strong("Viewing:"),
-          tags$p(class = "text-info", style = "font-size: 18px; margin-top: 10px;",
-                 faculty_info()$fac_name)
+      tags$div(
+        style = "background: linear-gradient(135deg, #3c8dbc 0%, #2c6d9c 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);",
+        tags$h2(
+          style = "margin: 0 0 5px 0; font-weight: bold;",
+          icon("user-circle"), " ", logged_in_name
+        ),
+        tags$p(
+          style = "margin: 0; opacity: 0.9;",
+          "My Teaching Evaluation Summary"
         )
-      } else {
-        # Leaders - show faculty selector
-        accessible_faculty <- faculty_info()$accessible_faculty
-
-        selectInput(
-          ns("selected_faculty"),
-          "Select Faculty to View:",
-          choices = setNames(accessible_faculty, accessible_faculty),
-          selected = accessible_faculty[1]
-        )
-      }
+      )
     })
 
-    # Determine which faculty to show
+    # Simple reactive to get the logged-in faculty name
+    # This tab ALWAYS shows only the logged-in user's data
     display_faculty <- reactive({
       req(faculty_info())
-
-      access_level <- faculty_info()$access_level
-
-      if (access_level == "individual") {
-        # Regular faculty - show their own data
-        return(faculty_info()$fac_name)
-      } else {
-        # Leaders - show selected faculty
-        req(input$selected_faculty)
-        return(input$selected_faculty)
-      }
+      faculty_info()$fac_name
     })
 
-    # Reactive: filtered evaluation data for selected faculty
+    # Reactive: filtered evaluation data for the LOGGED-IN faculty member only
     filtered_evals <- reactive({
       req(display_faculty())
 
@@ -363,6 +370,59 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       )
     })
 
+    # Assessment counts (faculty evaluating residents)
+    assessment_stats <- reactive({
+      req(display_faculty())
+      get_faculty_assessment_stats(
+        rdm_data$assessment,
+        faculty_name = display_faculty(),
+        peer_faculty_list = NULL,  # Compare to all faculty
+        academic_year = input$time_filter
+      )
+    })
+
+    output$my_assessments_count <- renderValueBox({
+      stats <- assessment_stats()
+      valueBox(
+        stats$individual_count,
+        "Assessments I Completed",
+        icon = icon("edit"),
+        color = "green"
+      )
+    })
+
+    output$assessments_vs_mean <- renderValueBox({
+      stats <- assessment_stats()
+      diff <- stats$individual_count - stats$peer_mean
+      color <- if (is.na(diff)) "light-blue" else if (diff >= 0) "green" else "yellow"
+      subtitle <- if (is.na(stats$peer_mean)) {
+        "vs. Peer Average"
+      } else {
+        paste0("vs. Avg: ", stats$peer_mean)
+      }
+      valueBox(
+        if (is.na(diff)) "--" else paste0(ifelse(diff >= 0, "+", ""), round(diff, 0)),
+        subtitle,
+        icon = icon("balance-scale"),
+        color = color
+      )
+    })
+
+    output$assessments_rank <- renderValueBox({
+      stats <- assessment_stats()
+      rank_text <- if (is.na(stats$rank)) {
+        "--"
+      } else {
+        paste0("#", stats$rank, " of ", stats$total_faculty)
+      }
+      valueBox(
+        rank_text,
+        "Rank Among Faculty",
+        icon = icon("trophy"),
+        color = "blue"
+      )
+    })
+
     # Spider plot
     output$spider_plot <- renderPlotly({
       if (!meets_threshold()) {
@@ -443,15 +503,29 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       }
     })
 
-    # Plus feedback table
+    # Plus feedback table - only show if threshold met
     output$plus_table <- DT::renderDataTable({
+      if (!meets_threshold()) {
+        return(datatable(
+          data.frame(Message = "Insufficient evaluations to display feedback"),
+          options = list(dom = 't'),
+          rownames = FALSE
+        ))
+      }
       faculty_to_show <- display_faculty()
       feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
       create_feedback_table(feedback$plus, "plus")
     })
 
-    # Delta feedback table
+    # Delta feedback table - only show if threshold met
     output$delta_table <- DT::renderDataTable({
+      if (!meets_threshold()) {
+        return(datatable(
+          data.frame(Message = "Insufficient evaluations to display feedback"),
+          options = list(dom = 't'),
+          rownames = FALSE
+        ))
+      }
       faculty_to_show <- display_faculty()
       feedback <- get_faculty_feedback(filtered_evals(), faculty_to_show)
       create_feedback_table(feedback$delta, "delta")
