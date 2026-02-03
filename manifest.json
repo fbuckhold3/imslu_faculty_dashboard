@@ -432,6 +432,36 @@
         "Built": "R 4.3.3; ; 2025-03-28 06:27:30 UTC; unix"
       }
     },
+    "bs4Dash": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "bs4Dash",
+        "Type": "Package",
+        "Title": "A 'Bootstrap 4' Version of 'shinydashboard'",
+        "Version": "2.3.4",
+        "Authors@R": "c(\n  person(\"David\", \"Granjon\", email = \"dgranjon@ymail.com\", role = c(\"aut\", \"cre\")),\n  person(family = \"RinteRface\", role = \"cph\"),\n  person(family = \"Almasaeed Studio\", role = c(\"ctb\", \"cph\"), comment = \"AdminLTE3 theme for Bootstrap 4\"),\n  person(\"Winston\", \"Chang\", role = c(\"ctb\", \"cph\"), comment = \"Utils functions from shinydashboard\"))",
+        "Maintainer": "David Granjon <dgranjon@ymail.com>",
+        "Description": "Make 'Bootstrap 4' Shiny dashboards. Use the full power\n    of 'AdminLTE3', a dashboard template built on top of 'Bootstrap 4' \n    <https://github.com/ColorlibHQ/AdminLTE>.",
+        "URL": "https://github.com/RinteRface/bs4Dash,\nhttps://bs4dash.rinterface.com/",
+        "BugReports": "https://github.com/RinteRface/bs4Dash/issues",
+        "License": "GPL (>= 2) | file LICENSE",
+        "Imports": "shiny (>= 1.6.0), htmltools (>= 0.5.1.1), jsonlite (>=\n0.9.16), fresh, waiter (>= 0.2.3), httpuv (>= 1.5.2),\nlifecycle, bslib (>= 0.2.4), httr",
+        "Suggests": "knitr, rmarkdown, testthat (>= 2.1.0), golem, DT, thematic\n(>= 0.1.2)",
+        "Encoding": "UTF-8",
+        "RoxygenNote": "7.3.2",
+        "VignetteBuilder": "knitr",
+        "Collate": "'feedbacks.R' 'useful-items.R' 'tabs.R' 'render-functions.R'\n'cards.R' 'dashboardSidebar.R' 'dashboardBody.R'\n'dashboardFooter.R' 'dashboardControlbar.R' 'dashboardHeader.R'\n'dashboardPage.R' 'aliases.R' 'auto-color.R'\n'bs4Dash-package.r' 'bs4DashGallery.R' 'deps.R' 'grid.R'\n'inputs.R' 'skinSelector.R' 'utils.R'",
+        "RdMacros": "lifecycle",
+        "Depends": "R (>= 2.10)",
+        "NeedsCompilation": "no",
+        "Packaged": "2024-09-03 20:07:37 UTC; davidgranjon",
+        "Author": "David Granjon [aut, cre],\n  RinteRface [cph],\n  Almasaeed Studio [ctb, cph] (AdminLTE3 theme for Bootstrap 4),\n  Winston Chang [ctb, cph] (Utils functions from shinydashboard)",
+        "Repository": "CRAN",
+        "Date/Publication": "2024-09-03 20:40:07 UTC",
+        "Built": "R 4.3.3; ; 2024-09-04 00:41:01 UTC; unix"
+      }
+    },
     "bslib": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -1093,6 +1123,32 @@
         "Repository": "CRAN",
         "Date/Publication": "2023-01-29 22:20:02 UTC",
         "Built": "R 4.3.0; ; 2023-04-11 04:44:59 UTC; unix"
+      }
+    },
+    "fresh": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "fresh",
+        "Title": "Create Custom 'Bootstrap' Themes to Use in 'Shiny'",
+        "Version": "0.2.1",
+        "Authors@R": "c(\n  person(\"Victor\", \"Perrier\", email = \"victor.perrier@dreamrs.fr\", role = c(\"aut\", \"cre\", \"cph\")),\n  person(\"Fanny\", \"Meyer\", role = \"aut\"),\n  person(\"Thomas\", \"Park\", role = c(\"ctb\", \"cph\"), comment = \"Bootswatch themes\"),\n  person(\"Mark\", \"Otto\", role = \"ctb\", comment = \"Bootstrap library\"),\n  person(\"Jacob\", \"Thornton\", role = \"ctb\", comment = \"Bootstrap library\"),\n  person(family = \"Bootstrap contributors\", role = \"ctb\", comment = \"Bootstrap library\"),\n  person(family = \"Twitter, Inc\", role = \"cph\", comment = \"Bootstrap library\"),\n  person(\"onkbear\", role = c(\"ctb\", \"cph\"), comment = \"admin-lte-2-sass\"),\n  person(family = \"Colorlib\", role = c(\"ctb\", \"cph\"), comment = \"AdminLTE\"))",
+        "Description": "Customize 'Bootstrap' and 'Bootswatch' themes, like colors, fonts, grid layout, \n  to use in 'Shiny' applications, 'rmarkdown' documents and 'flexdashboard'.",
+        "URL": "https://github.com/dreamRs/fresh",
+        "BugReports": "https://github.com/dreamRs/fresh/issues",
+        "License": "GPL-3",
+        "Encoding": "UTF-8",
+        "Imports": "bslib, htmltools, rstudioapi, sass, shiny",
+        "Suggests": "bsicons, shinyWidgets, shinydashboard, bs4Dash, knitr,\nrmarkdown, testthat (>= 2.1.0), covr",
+        "RoxygenNote": "7.3.1",
+        "VignetteBuilder": "knitr",
+        "NeedsCompilation": "no",
+        "Packaged": "2024-06-26 09:11:52 UTC; victorp",
+        "Author": "Victor Perrier [aut, cre, cph],\n  Fanny Meyer [aut],\n  Thomas Park [ctb, cph] (Bootswatch themes),\n  Mark Otto [ctb] (Bootstrap library),\n  Jacob Thornton [ctb] (Bootstrap library),\n  Bootstrap contributors [ctb] (Bootstrap library),\n  Twitter, Inc [cph] (Bootstrap library),\n  onkbear [ctb, cph] (admin-lte-2-sass),\n  Colorlib [ctb, cph] (AdminLTE)",
+        "Maintainer": "Victor Perrier <victor.perrier@dreamrs.fr>",
+        "Repository": "CRAN",
+        "Date/Publication": "2024-06-26 09:50:11 UTC",
+        "Built": "R 4.3.3; ; 2024-09-17 23:13:20 UTC; unix"
       }
     },
     "fs": {
@@ -2751,29 +2807,58 @@
         "Built": "R 4.3.3; ; 2025-07-04 04:43:01 UTC; unix"
       }
     },
-    "shinydashboard": {
+    "shinyWidgets": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
       "description": {
-        "Package": "shinydashboard",
-        "Title": "Create Dashboards with 'Shiny'",
-        "Version": "0.7.3",
-        "Authors@R": "c(\n    person(\"Winston\", \"Chang\", , \"winston@posit.co\", role = c(\"aut\", \"cre\")),\n    person(\"Barbara\", \"Borges Ribeiro\", role = \"aut\"),\n    person(, \"Posit Software, PBC\", role = \"cph\"),\n    person(, \"Almasaeed Studio\", role = c(\"ctb\", \"cph\"),\n           comment = \"AdminLTE theme for Bootstrap\"),\n    person(, \"Adobe Systems Incorporated\", role = c(\"ctb\", \"cph\"),\n           comment = \"Source Sans Pro font\")\n  )",
-        "Description": "Create dashboards with 'Shiny'. This package provides a theme\n    on top of 'Shiny', making it easy to create attractive dashboards.",
-        "License": "MIT + file LICENSE",
-        "URL": "https://rstudio.github.io/shinydashboard/,\nhttps://github.com/rstudio/shinydashboard",
-        "BugReports": "https://github.com/rstudio/shinydashboard/issues",
-        "Depends": "R (>= 3.0)",
-        "Imports": "htmltools (>= 0.2.6), promises, shiny (>= 1.0.0), utils",
+        "Package": "shinyWidgets",
+        "Title": "Custom Inputs Widgets for Shiny",
+        "Version": "0.9.0",
+        "Authors@R": "c(\n  person(\"Victor\", \"Perrier\", email = \"victor.perrier@dreamrs.fr\", role = c(\"aut\", \"cre\", \"cph\")),\n  person(\"Fanny\", \"Meyer\", role = \"aut\"),\n  person(\"David\", \"Granjon\", role = \"aut\"),\n  person(\"Ian\", \"Fellows\", role = \"ctb\", comment = \"Methods for mutating vertical tabs & updateMultiInput\"),\n  person(\"Wil\", \"Davis\", role = \"ctb\", comment = \"numericRangeInput function\"),\n  person(\"Spencer\", \"Matthews\", role = \"ctb\", comment = \"autoNumeric methods\"),\n  person(family = \"JavaScript and CSS libraries authors\", role = c(\"ctb\", \"cph\"), comment = \"All authors are listed in LICENSE.md\")\n  )",
+        "Description": "Collection of custom input controls and user interface components for 'Shiny' applications. \n  Give your applications a unique and colorful style !",
+        "URL": "https://github.com/dreamRs/shinyWidgets,\nhttps://dreamrs.github.io/shinyWidgets/",
+        "BugReports": "https://github.com/dreamRs/shinyWidgets/issues",
+        "License": "GPL-3",
         "Encoding": "UTF-8",
+        "LazyData": "true",
         "RoxygenNote": "7.3.2",
+        "Depends": "R (>= 3.1.0)",
+        "Imports": "bslib, sass, shiny (>= 1.6.0), htmltools (>= 0.5.1), jsonlite,\ngrDevices, rlang",
+        "Suggests": "testthat, covr, ggplot2, DT, scales, shinydashboard,\nshinydashboardPlus",
         "NeedsCompilation": "no",
-        "Packaged": "2025-04-21 16:14:20 UTC; garrick",
-        "Author": "Winston Chang [aut, cre],\n  Barbara Borges Ribeiro [aut],\n  Posit Software, PBC [cph],\n  Almasaeed Studio [ctb, cph] (AdminLTE theme for Bootstrap),\n  Adobe Systems Incorporated [ctb, cph] (Source Sans Pro font)",
-        "Maintainer": "Winston Chang <winston@posit.co>",
+        "Packaged": "2025-02-21 09:09:48 UTC; perri",
+        "Author": "Victor Perrier [aut, cre, cph],\n  Fanny Meyer [aut],\n  David Granjon [aut],\n  Ian Fellows [ctb] (Methods for mutating vertical tabs &\n    updateMultiInput),\n  Wil Davis [ctb] (numericRangeInput function),\n  Spencer Matthews [ctb] (autoNumeric methods),\n  JavaScript and CSS libraries authors [ctb, cph] (All authors are listed\n    in LICENSE.md)",
+        "Maintainer": "Victor Perrier <victor.perrier@dreamrs.fr>",
         "Repository": "CRAN",
-        "Date/Publication": "2025-04-21 21:30:02 UTC",
-        "Built": "R 4.3.3; ; 2025-04-21 21:43:46 UTC; unix"
+        "Date/Publication": "2025-02-21 12:30:02 UTC",
+        "Built": "R 4.3.3; ; 2025-02-21 13:49:58 UTC; unix"
+      }
+    },
+    "shinyjs": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "shinyjs",
+        "Title": "Easily Improve the User Experience of Your Shiny Apps in Seconds",
+        "Version": "2.1.0",
+        "Authors@R": "person(\"Dean\", \"Attali\", \n    email = \"daattali@gmail.com\",\n    role = c(\"aut\", \"cre\"),\n    comment= c(ORCID=\"0000-0002-5645-3493\"))",
+        "Description": "Perform common useful JavaScript operations in Shiny apps that will\n    greatly improve your apps without having to know any JavaScript. Examples\n    include: hiding an element, disabling an input, resetting an input back to\n    its original value, delaying code execution by a few seconds, and many more\n    useful functions for both the end user and the developer. 'shinyjs' can also\n    be used to easily call your own custom JavaScript functions from R.",
+        "URL": "https://deanattali.com/shinyjs/",
+        "BugReports": "https://github.com/daattali/shinyjs/issues",
+        "Depends": "R (>= 3.1.0)",
+        "Imports": "digest (>= 0.6.8), jsonlite, shiny (>= 1.0.0)",
+        "Suggests": "htmltools (>= 0.2.9), knitr (>= 1.7), rmarkdown, shinyAce,\nshinydisconnect, testthat (>= 0.9.1)",
+        "License": "MIT + file LICENSE",
+        "VignetteBuilder": "knitr",
+        "RoxygenNote": "7.1.1",
+        "Encoding": "UTF-8",
+        "NeedsCompilation": "no",
+        "Packaged": "2021-12-21 11:32:22 UTC; Dean-X1C",
+        "Author": "Dean Attali [aut, cre] (<https://orcid.org/0000-0002-5645-3493>)",
+        "Maintainer": "Dean Attali <daattali@gmail.com>",
+        "Repository": "CRAN",
+        "Date/Publication": "2021-12-23 10:10:02 UTC",
+        "Built": "R 4.3.0; ; 2023-04-11 04:49:20 UTC; unix"
       }
     },
     "sourcetools": {
@@ -3308,6 +3393,33 @@
         "Archs": "vroom.so.dSYM"
       }
     },
+    "waiter": {
+      "Source": "CRAN",
+      "Repository": "https://cran.rstudio.com",
+      "description": {
+        "Package": "waiter",
+        "Title": "Loading Screen for 'Shiny'",
+        "Version": "0.2.5",
+        "Date": "2022-01-02",
+        "Authors@R": "c(\n    person(given = \"John\",\n           family = \"Coene\",\n           role = c(\"aut\", \"cre\"),\n           email = \"jcoenep@gmail.com\"),\n    person(given = \"Jinhwan\",\n           family = \"Kim\",\n           role = \"ctb\",\n           email = 'hwanistic@gmail.com'),\n    person(given = \"Victor\",\n           family = \"Granda\",\n           role = c(\"ctb\"),\n           email = \"victorgrandagarcia@gmail.com\",\n           comment = c(ORCID = \"0000-0002-0469-1991\")))",
+        "Description": "Full screen and partial loading screens for 'Shiny' with spinners, progress bars, and notifications.",
+        "License": "MIT + file LICENSE",
+        "URL": "https://waiter.john-coene.com/,\nhttps://github.com/JohnCoene/waiter",
+        "BugReports": "https://github.com/JohnCoene/waiter/issues",
+        "Encoding": "UTF-8",
+        "Imports": "R6, shiny, htmltools",
+        "RoxygenNote": "7.1.2",
+        "Suggests": "httr, knitr, packer, rmarkdown",
+        "VignetteBuilder": "knitr",
+        "NeedsCompilation": "no",
+        "Packaged": "2022-01-03 13:33:14 UTC; john",
+        "Author": "John Coene [aut, cre],\n  Jinhwan Kim [ctb],\n  Victor Granda [ctb] (<https://orcid.org/0000-0002-0469-1991>)",
+        "Maintainer": "John Coene <jcoenep@gmail.com>",
+        "Repository": "CRAN",
+        "Date/Publication": "2022-01-03 14:30:02 UTC",
+        "Built": "R 4.3.0; ; 2023-04-11 04:50:00 UTC; unix"
+      }
+    },
     "withr": {
       "Source": "CRAN",
       "Repository": "https://cran.rstudio.com",
@@ -3460,7 +3572,7 @@
       "checksum": "151d7beaf9234c0093863aa9174cb585"
     },
     "app.R": {
-      "checksum": "79f3d80a2edb2a463146b9c2ad697d11"
+      "checksum": "2e3f78d9c39f0e5c3423c86dde6e5e21"
     },
     "Claude.md": {
       "checksum": "e5b824585a78f815b97978f393d5fce7"
@@ -3472,19 +3584,19 @@
       "checksum": "ef8b968a6a34251cf81c0168564c2cb7"
     },
     "global.R": {
-      "checksum": "8098106253e1d23c91d2a9a134591545"
+      "checksum": "0862aa3f9881b77c667543c3586bd455"
     },
     "R/modules/mod_faculty_eval_old.R": {
       "checksum": "e45571661ea5e64d37fcef062432b164"
     },
     "R/modules/mod_faculty_eval.R": {
-      "checksum": "840dd03ecdec9b5190707769ff0d5e9a"
+      "checksum": "1c5ef37976300a6f8c1364c13612ee91"
     },
     "R/modules/mod_leader_dashboard.R": {
-      "checksum": "dd9513d04faebabc24d68ca3b1fa38e1"
+      "checksum": "72435ce3bbef78ce45dc7ab046382926"
     },
     "R/modules/mod_login.R": {
-      "checksum": "af2fc7957c8ce9acf7363315ee2fb416"
+      "checksum": "bcb71323100f86faf3d812c27144cf6c"
     },
     "R/utils/calculations.R": {
       "checksum": "677095daa5ce364a68e73376457c4d0b"
