@@ -6,11 +6,11 @@ mod_leader_dashboard_ui <- function(id) {
   ns <- NS(id)
 
   tagList(
-    # Filter controls
+    # Filter controls with prominent time toggle
     fluidRow(
       column(
-        width = 12,
-        box(
+        width = 8,
+        bs4Card(
           title = "Dashboard Filters",
           width = 12,
           status = "primary",
@@ -20,29 +20,40 @@ mod_leader_dashboard_ui <- function(id) {
           fluidRow(
             # Division selector (for department leaders only)
             column(
-              width = 3,
+              width = 4,
               uiOutput(ns("division_selector_ui"))
             ),
             # Clinical site selector (for full oversight users only)
             column(
-              width = 3,
+              width = 4,
               uiOutput(ns("clinical_site_selector_ui"))
             ),
             column(
-              width = 3,
-              radioButtons(
-                ns("time_filter"),
-                "Time Period:",
-                choices = c(
-                  "Current Academic Year" = "current",
-                  "All Time" = "all"
-                ),
-                selected = "current"
-              )
-            ),
-            column(
-              width = 3,
+              width = 4,
               uiOutput(ns("dashboard_info"))
+            )
+          )
+        )
+      ),
+      column(
+        width = 4,
+        bs4Card(
+          title = NULL,
+          width = 12,
+          status = "white",
+          collapsible = FALSE,
+          headerBorder = FALSE,
+          # Prominent time period toggle
+          tags$div(
+            style = "text-align: center; padding: 10px;",
+            tags$label("Time Period", style = "font-weight: bold; display: block; margin-bottom: 10px;"),
+            shinyWidgets::radioGroupButtons(
+              inputId = ns("time_filter"),
+              choices = c("Current Year" = "current", "All Time" = "all"),
+              selected = "current",
+              status = "primary",
+              size = "lg",
+              justified = TRUE
             )
           )
         )
@@ -53,7 +64,7 @@ mod_leader_dashboard_ui <- function(id) {
     fluidRow(
       column(
         width = 12,
-        box(
+        bs4Card(
           title = "Faculty Drill-Down",
           width = 12,
           status = "warning",
@@ -72,10 +83,10 @@ mod_leader_dashboard_ui <- function(id) {
 
     # Summary value boxes
     fluidRow(
-      valueBoxOutput(ns("total_faculty"), width = 3),
-      valueBoxOutput(ns("total_evals"), width = 3),
-      valueBoxOutput(ns("avg_overall"), width = 3),
-      valueBoxOutput(ns("total_assessments"), width = 3)
+      bs4ValueBoxOutput(ns("total_faculty"), width = 3),
+      bs4ValueBoxOutput(ns("total_evals"), width = 3),
+      bs4ValueBoxOutput(ns("avg_overall"), width = 3),
+      bs4ValueBoxOutput(ns("total_assessments"), width = 3)
     ),
 
     # Faculty summary table (only shown in aggregate view)
@@ -85,21 +96,23 @@ mod_leader_dashboard_ui <- function(id) {
     fluidRow(
       column(
         width = 6,
-        box(
+        bs4Card(
           title = uiOutput(ns("spider_plot_title")),
           width = 12,
-          status = "info",
+          status = "primary",
           solidHeader = TRUE,
+          collapsible = TRUE,
           plotlyOutput(ns("spider_plot"), height = "400px")
         )
       ),
       column(
         width = 6,
-        box(
+        bs4Card(
           title = uiOutput(ns("bar_chart_title")),
           width = 12,
-          status = "info",
+          status = "primary",
           solidHeader = TRUE,
+          collapsible = TRUE,
           plotlyOutput(ns("bar_chart"), height = "400px")
         )
       )
@@ -109,11 +122,12 @@ mod_leader_dashboard_ui <- function(id) {
     fluidRow(
       column(
         width = 12,
-        box(
+        bs4Card(
           title = uiOutput(ns("comparison_table_title")),
           width = 12,
-          status = "primary",
+          status = "info",
           solidHeader = TRUE,
+          collapsible = TRUE,
           DT::dataTableOutput(ns("comparison_table")),
           uiOutput(ns("comparison_table_help"))
         )
@@ -124,11 +138,13 @@ mod_leader_dashboard_ui <- function(id) {
     fluidRow(
       column(
         width = 12,
-        box(
+        bs4Card(
           title = "Additional Metrics (Various Scales)",
           width = 12,
           status = "warning",
           solidHeader = TRUE,
+          collapsible = TRUE,
+          collapsed = TRUE,
           DT::dataTableOutput(ns("secondary_metrics_table")),
           tags$p(
             class = "text-muted",
@@ -145,10 +161,10 @@ mod_leader_dashboard_ui <- function(id) {
     fluidRow(
       column(
         width = 8,
-        box(
+        bs4Card(
           title = "Conference Attendance - Last 4 Weeks",
           width = 12,
-          status = "info",
+          status = "secondary",
           solidHeader = TRUE,
           collapsible = TRUE,
           collapsed = TRUE,
@@ -161,10 +177,10 @@ mod_leader_dashboard_ui <- function(id) {
       ),
       column(
         width = 4,
-        box(
+        bs4Card(
           title = "Conference Attendance Summary",
           width = 12,
-          status = "info",
+          status = "secondary",
           solidHeader = TRUE,
           collapsible = TRUE,
           collapsed = TRUE,
@@ -429,39 +445,39 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
     })
 
     # Value boxes
-    output$total_faculty <- renderValueBox({
+    output$total_faculty <- renderbs4ValueBox({
       faculty_to_show <- display_faculty()
 
       if (faculty_to_show[1] == "__all__") {
         # Aggregate view - show count
         n <- length(scoped_faculty())
-        valueBox(
-          n,
-          "Faculty Members",
+        bs4ValueBox(
+          value = n,
+          subtitle = "Faculty Members",
           icon = icon("user-tie"),
-          color = "blue"
+          color = "primary"
         )
       } else if (length(faculty_to_show) == 1) {
         # Individual view - show faculty name
-        valueBox(
-          icon("user"),
-          faculty_to_show[1],
+        bs4ValueBox(
+          value = icon("user"),
+          subtitle = faculty_to_show[1],
           icon = icon("user-tie"),
-          color = "blue"
+          color = "primary"
         )
       } else {
         # Multiple selected
         n <- length(faculty_to_show)
-        valueBox(
-          n,
-          "Selected Faculty",
+        bs4ValueBox(
+          value = n,
+          subtitle = "Selected Faculty",
           icon = icon("user-tie"),
-          color = "blue"
+          color = "primary"
         )
       }
     })
 
-    output$total_evals <- renderValueBox({
+    output$total_evals <- renderbs4ValueBox({
       n <- nrow(scoped_evals())
       faculty_to_show <- display_faculty()
 
@@ -473,29 +489,29 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         "Total Evaluations"
       }
 
-      valueBox(
-        n,
-        label,
+      bs4ValueBox(
+        value = n,
+        subtitle = label,
         icon = icon("clipboard-check"),
-        color = "green"
+        color = "success"
       )
     })
 
-    output$avg_overall <- renderValueBox({
+    output$avg_overall <- renderbs4ValueBox({
       if (nrow(scoped_evals()) < MIN_EVALUATIONS) {
-        valueBox("--", "Avg Overall Rating", icon = icon("star"), color = "light-blue")
+        bs4ValueBox(value = "--", subtitle = "Avg Overall Rating", icon = icon("star"), color = "secondary")
       } else {
         avg <- mean(scoped_evals()$att_overall, na.rm = TRUE)
-        valueBox(
-          round(avg, 2),
-          "Avg Overall Rating",
+        bs4ValueBox(
+          value = round(avg, 2),
+          subtitle = "Avg Overall Rating",
           icon = icon("star"),
-          color = "yellow"
+          color = "warning"
         )
       }
     })
 
-    output$total_assessments <- renderValueBox({
+    output$total_assessments <- renderbs4ValueBox({
       year <- if (input$time_filter == "current") "current" else "all"
       faculty_to_show <- display_faculty()
 
@@ -528,11 +544,11 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         label <- "Assessments Given"
       }
 
-      valueBox(
-        n,
-        label,
+      bs4ValueBox(
+        value = n,
+        subtitle = label,
         icon = icon("clipboard-list"),
-        color = "purple"
+        color = "info"
       )
     })
 
@@ -545,7 +561,7 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         fluidRow(
           column(
             width = 12,
-            box(
+            bs4Card(
               title = "Faculty Performance Summary",
               width = 12,
               status = "success",
@@ -827,7 +843,7 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
         fluidRow(
           column(
             width = 6,
-            box(
+            bs4Card(
               title = "Positive Feedback (Plus)",
               width = 12,
               status = "success",
@@ -838,7 +854,7 @@ mod_leader_dashboard_server <- function(id, faculty_info, rdm_data, faculty_data
           ),
           column(
             width = 6,
-            box(
+            bs4Card(
               title = "Areas for Growth (Delta)",
               width = 12,
               status = "warning",

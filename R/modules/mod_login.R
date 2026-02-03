@@ -20,11 +20,12 @@ mod_login_ui <- function(id) {
     column(
       width = 6,
       offset = 3,
-      box(
+      bs4Card(
         title = "Faculty Dashboard Login",
         width = 12,
         status = "primary",
         solidHeader = TRUE,
+        collapsible = FALSE,
 
         # Dynamic UI based on production mode
         uiOutput(ns("login_form")),
@@ -32,7 +33,7 @@ mod_login_ui <- function(id) {
         actionButton(
           ns("login_btn"),
           "Login",
-          class = "btn-primary",
+          class = "btn-primary btn-lg",
           icon = icon("sign-in-alt"),
           width = "100%"
         ),

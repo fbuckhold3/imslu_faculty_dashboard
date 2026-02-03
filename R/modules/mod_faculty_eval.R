@@ -3,73 +3,71 @@
 # Leaders use the Leadership Dashboard to view other faculty
 
 mod_faculty_eval_ui <- function(id) {
+
   ns <- NS(id)
 
   tagList(
-    # Prominent header showing the logged-in faculty member's name
+    # Prominent header with name and time filter toggle
     fluidRow(
       column(
-        width = 12,
+        width = 8,
         uiOutput(ns("faculty_header"))
-      )
-    ),
-
-    # Filter controls (time period only - no faculty selector)
-    fluidRow(
+      ),
       column(
-        width = 12,
-        box(
-          title = "Filters",
+        width = 4,
+        bs4Card(
+          title = NULL,
           width = 12,
-          status = "primary",
-          solidHeader = TRUE,
-          collapsible = TRUE,
-
-          fluidRow(
-            column(
-              width = 6,
-              radioButtons(
-                ns("time_filter"),
-                "Time Period:",
-                choices = c(
-                  "Current Academic Year" = "current",
-                  "All Time" = "all"
-                ),
-                selected = "current",
-                inline = TRUE
-              )
-            ),
-            column(
-              width = 6,
-              uiOutput(ns("filter_info"))
+          status = "white",
+          collapsible = FALSE,
+          headerBorder = FALSE,
+          # Prominent time period toggle
+          tags$div(
+            style = "text-align: center; padding: 10px;",
+            tags$label("Time Period", style = "font-weight: bold; display: block; margin-bottom: 10px;"),
+            shinyWidgets::radioGroupButtons(
+              inputId = ns("time_filter"),
+              choices = c("Current Year" = "current", "All Time" = "all"),
+              selected = "current",
+              status = "primary",
+              size = "lg",
+              justified = TRUE
             )
           )
         )
       )
     ),
 
+    # Filter info
+    fluidRow(
+      column(
+        width = 12,
+        uiOutput(ns("filter_info"))
+      )
+    ),
+
     # Summary value boxes - Evaluations received
     fluidRow(
-      valueBoxOutput(ns("total_evals"), width = 3),
-      valueBoxOutput(ns("avg_overall"), width = 3),
-      valueBoxOutput(ns("avg_time_teaching"), width = 3),
-      valueBoxOutput(ns("plus_count"), width = 3)
+      bs4ValueBoxOutput(ns("total_evals"), width = 3),
+      bs4ValueBoxOutput(ns("avg_overall"), width = 3),
+      bs4ValueBoxOutput(ns("avg_time_teaching"), width = 3),
+      bs4ValueBoxOutput(ns("plus_count"), width = 3)
     ),
 
     # Assessments completed section
     fluidRow(
       column(
         width = 12,
-        box(
+        bs4Card(
           title = "My Resident Assessments Completed",
           width = 12,
           status = "success",
           solidHeader = TRUE,
           collapsible = TRUE,
           fluidRow(
-            valueBoxOutput(ns("my_assessments_count"), width = 4),
-            valueBoxOutput(ns("assessments_vs_mean"), width = 4),
-            valueBoxOutput(ns("assessments_rank"), width = 4)
+            bs4ValueBoxOutput(ns("my_assessments_count"), width = 4),
+            bs4ValueBoxOutput(ns("assessments_vs_mean"), width = 4),
+            bs4ValueBoxOutput(ns("assessments_rank"), width = 4)
           )
         )
       )
@@ -79,21 +77,23 @@ mod_faculty_eval_ui <- function(id) {
     fluidRow(
       column(
         width = 6,
-        box(
+        bs4Card(
           title = "Evaluation Comparison - Spider Plot",
           width = 12,
-          status = "info",
+          status = "primary",
           solidHeader = TRUE,
+          collapsible = TRUE,
           plotlyOutput(ns("spider_plot"), height = "400px")
         )
       ),
       column(
         width = 6,
-        box(
+        bs4Card(
           title = "Evaluation Comparison - Bar Chart",
           width = 12,
-          status = "info",
+          status = "primary",
           solidHeader = TRUE,
+          collapsible = TRUE,
           plotlyOutput(ns("bar_chart"), height = "400px")
         )
       )
@@ -103,11 +103,12 @@ mod_faculty_eval_ui <- function(id) {
     fluidRow(
       column(
         width = 12,
-        box(
+        bs4Card(
           title = "Primary Evaluation Domains (1-5 Scale)",
           width = 12,
-          status = "primary",
+          status = "info",
           solidHeader = TRUE,
+          collapsible = TRUE,
           DT::dataTableOutput(ns("comparison_table")),
           tags$p(
             class = "text-muted",
@@ -121,11 +122,13 @@ mod_faculty_eval_ui <- function(id) {
     fluidRow(
       column(
         width = 12,
-        box(
+        bs4Card(
           title = "Additional Metrics (Various Scales)",
           width = 12,
           status = "warning",
           solidHeader = TRUE,
+          collapsible = TRUE,
+          collapsed = TRUE,
           DT::dataTableOutput(ns("secondary_metrics_table")),
           tags$p(
             class = "text-muted",
@@ -139,7 +142,7 @@ mod_faculty_eval_ui <- function(id) {
     fluidRow(
       column(
         width = 6,
-        box(
+        bs4Card(
           title = "Positive Feedback (Plus)",
           width = 12,
           status = "success",
@@ -150,7 +153,7 @@ mod_faculty_eval_ui <- function(id) {
       ),
       column(
         width = 6,
-        box(
+        bs4Card(
           title = "Areas for Growth (Delta)",
           width = 12,
           status = "warning",
@@ -165,10 +168,10 @@ mod_faculty_eval_ui <- function(id) {
     fluidRow(
       column(
         width = 8,
-        box(
+        bs4Card(
           title = "Conference Attendance - Last 4 Weeks",
           width = 12,
-          status = "info",
+          status = "secondary",
           solidHeader = TRUE,
           collapsible = TRUE,
           collapsed = TRUE,
@@ -181,10 +184,10 @@ mod_faculty_eval_ui <- function(id) {
       ),
       column(
         width = 4,
-        box(
+        bs4Card(
           title = "Conference Attendance Summary",
           width = 12,
-          status = "info",
+          status = "secondary",
           solidHeader = TRUE,
           collapsible = TRUE,
           collapsed = TRUE,
@@ -322,51 +325,51 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
     })
 
     # Value boxes
-    output$total_evals <- renderValueBox({
+    output$total_evals <- renderbs4ValueBox({
       n <- nrow(filtered_evals())
-      valueBox(
-        n,
-        "Total Evaluations",
+      bs4ValueBox(
+        value = n,
+        subtitle = "Total Evaluations",
         icon = icon("clipboard-check"),
-        color = if (meets_threshold()) "blue" else "red"
+        color = if (meets_threshold()) "primary" else "danger"
       )
     })
 
-    output$avg_overall <- renderValueBox({
+    output$avg_overall <- renderbs4ValueBox({
       if (!meets_threshold()) {
-        valueBox("--", "Avg Overall", icon = icon("star"), color = "light-blue")
+        bs4ValueBox(value = "--", subtitle = "Avg Overall", icon = icon("star"), color = "secondary")
       } else {
         avg <- mean(filtered_evals()$att_overall, na.rm = TRUE)
-        valueBox(
-          round(avg, 2),
-          "Avg Overall Rating",
+        bs4ValueBox(
+          value = round(avg, 2),
+          subtitle = "Avg Overall Rating",
           icon = icon("star"),
-          color = "green"
+          color = "success"
         )
       }
     })
 
-    output$avg_time_teaching <- renderValueBox({
+    output$avg_time_teaching <- renderbs4ValueBox({
       if (!meets_threshold()) {
-        valueBox("--", "Avg Time Teaching", icon = icon("clock"), color = "light-blue")
+        bs4ValueBox(value = "--", subtitle = "Avg Time Teaching", icon = icon("clock"), color = "secondary")
       } else {
         avg <- mean(filtered_evals()$time_teaching, na.rm = TRUE)
-        valueBox(
-          round(avg, 2),
-          "Avg Time for Teaching",
+        bs4ValueBox(
+          value = round(avg, 2),
+          subtitle = "Avg Time for Teaching",
           icon = icon("clock"),
-          color = "yellow"
+          color = "warning"
         )
       }
     })
 
-    output$plus_count <- renderValueBox({
+    output$plus_count <- renderbs4ValueBox({
       n <- sum(!is.na(filtered_evals()$plus) & filtered_evals()$plus != "")
-      valueBox(
-        n,
-        "Positive Comments",
+      bs4ValueBox(
+        value = n,
+        subtitle = "Positive Comments",
         icon = icon("thumbs-up"),
-        color = "purple"
+        color = "info"
       )
     })
 
@@ -381,45 +384,45 @@ mod_faculty_eval_server <- function(id, faculty_info, rdm_data, faculty_data) {
       )
     })
 
-    output$my_assessments_count <- renderValueBox({
+    output$my_assessments_count <- renderbs4ValueBox({
       stats <- assessment_stats()
-      valueBox(
-        stats$individual_count,
-        "Assessments I Completed",
+      bs4ValueBox(
+        value = stats$individual_count,
+        subtitle = "Assessments I Completed",
         icon = icon("edit"),
-        color = "green"
+        color = "success"
       )
     })
 
-    output$assessments_vs_mean <- renderValueBox({
+    output$assessments_vs_mean <- renderbs4ValueBox({
       stats <- assessment_stats()
       diff <- stats$individual_count - stats$peer_mean
-      color <- if (is.na(diff)) "light-blue" else if (diff >= 0) "green" else "yellow"
+      box_color <- if (is.na(diff)) "secondary" else if (diff >= 0) "success" else "warning"
       subtitle <- if (is.na(stats$peer_mean)) {
         "vs. Peer Average"
       } else {
         paste0("vs. Avg: ", stats$peer_mean)
       }
-      valueBox(
-        if (is.na(diff)) "--" else paste0(ifelse(diff >= 0, "+", ""), round(diff, 0)),
-        subtitle,
+      bs4ValueBox(
+        value = if (is.na(diff)) "--" else paste0(ifelse(diff >= 0, "+", ""), round(diff, 0)),
+        subtitle = subtitle,
         icon = icon("balance-scale"),
-        color = color
+        color = box_color
       )
     })
 
-    output$assessments_rank <- renderValueBox({
+    output$assessments_rank <- renderbs4ValueBox({
       stats <- assessment_stats()
       rank_text <- if (is.na(stats$rank)) {
         "--"
       } else {
         paste0("#", stats$rank, " of ", stats$total_faculty)
       }
-      valueBox(
-        rank_text,
-        "Rank Among Faculty",
+      bs4ValueBox(
+        value = rank_text,
+        subtitle = "Rank Among Faculty",
         icon = icon("trophy"),
-        color = "blue"
+        color = "primary"
       )
     })
 

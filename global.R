@@ -1,8 +1,11 @@
 library(shiny)
-library(shinydashboard)
+library(shinyjs)
+library(shinyWidgets)
+library(bs4Dash)
 library(tidyverse)
 library(DT)
 library(plotly)
+library(fresh)  # For custom theming
 
 source("R/utils/data_processing.R")
 source("R/utils/calculations.R")
