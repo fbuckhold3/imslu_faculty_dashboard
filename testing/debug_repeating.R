@@ -14,7 +14,7 @@ cat("✓ Faculty data loaded:", nrow(faculty_data), "records\n\n")
 cat("Downloading raw RDM data (with raw_or_label = 'label')...\n")
 all_data <- REDCapR::redcap_read(
   redcap_uri = Sys.getenv("REDCAP_URL"),
-  token = Sys.getenv("RDM_REDCAP_TOKEN"),
+  token = Sys.getenv("RDM_TOKEN"),
   raw_or_label = 'label'
 )$data
 

@@ -4,7 +4,7 @@ library(tidyverse)
 
 cat("Testing user's exact POST approach...\n\n")
 
-token <- Sys.getenv("RDM_REDCAP_TOKEN")
+token <- Sys.getenv("RDM_TOKEN")
 url <- Sys.getenv("REDCAP_URL")
 
 formData <- list("token"=token,

@@ -1,526 +1,357 @@
-# Faculty Dashboard Development Guide
+# Faculty Dashboard — imslu_faculty_dashboard
 
-## Project Overview
+Individual and leadership dashboard for IMSLU Internal Medicine faculty.
+Built with R/Shiny, integrating two REDCap databases (IMSLUFaculty + RDM2_0).
+Each faculty member logs in with a unique access code and sees only their
+own data; division admins and department leaders get scoped aggregate views.
+
 **Repository:** https://github.com/fbuckhold3/imslu_faculty_dashboard
+**Deploys to:** Posit Connect Cloud (manifest.json in repo, auto-deploys on push to main)
 
-Individual dashboard for Internal Medicine faculty to review assessments and teaching-related information through secure, unique access codes. Built with R/Shiny, integrating data from two REDCap databases (IMSLUFaculty and RDM2_0).
+## Current state (June 2026)
 
-## Current State
+In a 7-day push to full department rollout (~179 active faculty). Project plan,
+data-dictionary design, visualization inventory, and decision log live in the
+Cowork sub-project:
 
-### ✅ Completed
-- [x] Project structure created (R/modules, R/utils, R/wrappers, data, www)
-- [x] REDCap API connections working
-- [x] Data download functions optimized (single API call for speed)
-- [x] Test data saved locally for offline development
-- [x] Data validation completed - 1,404 faculty evaluations available
-- [x] Academic year calculation functions (July-June cycle)
-- [x] Name matching/cleaning utilities
-- [x] Minimal app (v0.1) with data display working
-
-### 🎯 Current Focus: Phase 1 Development
-
-**Priority Features:**
-1. Login module (faculty selection/access code)
-2. Faculty evaluations display with filtering
-3. Calculation of means and comparisons
-4. Resident work-room features
-
-## Data Structure
-
-### REDCap Databases
-
-**1. IMSLUFaculty Database** (237 records, 29 columns)
 ```
-Key Fields:
-- record_id: Unique faculty ID
-- fac_name: Faculty name (PRIMARY LINKING FIELD)
-- fac_email: Email address
-- fac_clin: Clinical affiliate (1=SSM, 2=VA, 3=Other)
-- fac_div: Division/Section
-- fac_fell: Faculty or Fellow (1=Faculty, 2=Fellow)
-- fac_med_ed___*: Med Ed leadership roles (checkbox)
-- fac_meded_fte: Educational FTE (0-1)
-- archived: Archived status (0=active)
-- fac_access: Access code (TO BE ADDED)
+~/Library/Cowork/faculty-dashboard-v1-launch/
+├── plan.md                # Phase 0–4 task list
+├── data-dictionary.md     # New REDCap fields being designed
+├── visualizations.md      # New viz + role × view access matrix
+├── decisions.md           # Architectural decision log
+└── launch-checklist.md    # Phase 4 production rollout
 ```
 
-**2. RDM2_0 Database** (5 forms downloaded)
+When starting a new chat on this app: read this file → then the Cowork README →
+then whichever phase doc is current.
 
-Data structure in R:
+## Architecture
+
+### Role-based access
+
+Three tiers, computed at login from faculty record fields. Defined in
+`R/modules/mod_login.R`.
+
+| Role | Trigger field | Data scope |
+|---|---|---|
+| `individual` | default | Own evaluations only |
+| `division_admin` | `fac_admin == "Yes"` | Faculty in same `fac_div` + same `fac_clin` |
+| `department_leader` | `dep_lead == "Yes"` | All faculty (scoped to `fac_clin` if set; full oversight if `fac_clin` is blank) |
+
+The login server returns a reactive `faculty_info()` list with `record_id`,
+`fac_name`, `access_level`, `accessible_faculty` (the list of names the user is
+allowed to view), plus division/site labels and an `has_full_oversight` flag for
+the top tier.
+
+### Production mode toggle
+
+`mod_login.R` checks the `PRODUCTION_MODE` environment variable:
+
+- `PRODUCTION_MODE=TRUE` → access-code field only
+- unset / `FALSE` → adds a testing dropdown of all active faculty (default: Fred Buckhold)
+
+Set on Posit Connect as an env var. Local dev runs without it set.
+
+### Data sources
+
+| DB | Token (env var) | What's in it |
+|---|---|---|
+| IMSLUFaculty | `FAC_TOKEN` | Faculty roster, access codes, roles, divisions |
+| RDM2_0 | `RDM_TOKEN` | All evaluations, assessments, ILPs, attendance |
+| (base URL) | `REDCAP_URL` | Shared base URL for the REDCap API |
+
+All tokens live in `~/.Renviron` locally and as Connect env vars in production —
+never in the repo.
+
+## Data structure
+
+### IMSLUFaculty (237 records, 29+ columns)
+
+```
+record_id          Unique faculty ID
+fac_name           Faculty name — PRIMARY LINKING FIELD to RDM data
+fac_email          Email
+fac_clin           Clinical affiliate (1=SSM, 2=VA, 3=Other)
+fac_div            Division/Section (numeric code; labels via REDCap data dict)
+fac_fell           Faculty (1) or Fellow (2)
+fac_med_ed___*     Med Ed leadership roles (checkbox)
+fac_meded_fte      Educational FTE (0–1)
+fac_access         Access code (login key)
+fac_admin          Division admin flag (yesno) — drives division_admin role
+dep_lead           Department leader flag (yesno) — drives department_leader role
+archived           Archived (0=active)
+```
+
+Active faculty: ~179 of 237.
+
+### RDM2_0 (6 forms downloaded via `download_rdm_focused()`)
+
 ```r
 rdm_redcap_data <- list(
-  faculty_evaluation = df,  # 1,404 rows - residents evaluating faculty
-  assessment = df,          # 207 rows - faculty evaluating residents
-  s_eval = df,             # 328 rows - resident self-evaluations
-  questions = df,          # 254 rows - attendance tracking
-  resident_data = df       # 194 rows - resident demographics
+  resident_data       = df,  # Resident demographics
+  assessment          = df,  # Faculty evaluating residents
+  faculty_evaluation  = df,  # Residents evaluating faculty
+  s_eval              = df,  # Resident self-evaluations
+  ilp                 = df,  # Individual learning plans (loaded but not yet consumed)
+  questions           = df   # Attendance / noon conference tracking
 )
 ```
 
-**faculty_evaluation form** (1,404 evaluations, 46 columns):
-```
-Key Fields:
-- record_id: Resident ID who submitted evaluation
-- fac_fell_name: Faculty being evaluated (LINKS TO fac_name)
-- time_teaching: Ensures time for teaching (1-5 scale)
-- att_overall: Overall teaching rating (1-5 scale)
-- att_ext_tea: Extra teaching effort (dropdown)
-- att_give_feed: Feedback type given
-- plus: Positive feedback (text)
-- delta: Improvement suggestions (text)
+The pull separates forms by `redcap_repeat_instrument` after one combined POST
+(faster than per-form API calls).
 
-Rating Distribution:
-  1: 15, 2: 25, 3: 66, 4: 267, 5: 744, NA: 287
-  Average: ~4.5 (very positive!)
-```
+**Key fields by form:**
 
-**assessment form** (207 rows, 118 columns):
+`faculty_evaluation` — residents evaluating faculty
 ```
-Key Fields:
-- record_id: Resident being assessed
-- ass_date: Assessment date
-- ass_faculty: Faculty performing assessment (LINKS TO fac_name)
-- ass_level: Resident level (1=Intern, 2=PGY2, 3=PGY3, etc)
-- ass_plus, ass_delta: Feedback
-- ass_obs_*: Observation-specific fields
+record_id            Resident submitting the eval
+fac_fell_name        Faculty being evaluated (LINKS TO fac_name)
+time_teaching        Ensures time for teaching (1–5)
+att_overall          Overall teaching rating (1–5)
+att_ext_tea          Extra teaching effort
+att_give_feed        Feedback type given
+plus / delta         Free-text feedback
 ```
 
-**s_eval form** (328 rows, 130 columns):
+`assessment` — faculty evaluating residents
 ```
-For Resident Report Cards:
-- s_e_topic_sel___*: Topics less confident in (checkbox, 23 options)
-- s_e_learn_style___*: Learning style preferences (checkbox, 12 options)
-- Use highest redcap_repeat_instance for most recent data
-```
-
-**questions form** (254 rows, 7 columns):
-```
-For Attendance Tracking:
-- record_id: Resident ID
-- q_date: Date
-- q_rotation: Rotation identifier
+record_id            Resident being assessed
+ass_date             Assessment date
+ass_faculty          Faculty performing (LINKS TO fac_name)
+ass_level            Resident level (1=Intern, 2=PGY2, 3=PGY3)
+ass_plus / ass_delta Feedback
+ass_obs_*            Observation-specific fields
 ```
 
-**resident_data form** (194 rows, 28 columns):
+`s_eval` — for resident report cards (use highest `redcap_repeat_instance`)
 ```
-- record_id: Resident ID
-- first_name, last_name, name: Resident names
-- grad_yr: Graduation year
-- type: Resident type (1=Preliminary, 2=Categorical, 3=Dismissed)
-- res_archive: Archived status (0=active, 55 currently active)
-- coach: Resident coach assignment
+s_e_topic_sel___*    Topics less confident in (checkbox, ~23 options)
+s_e_learn_style___*  Learning style preferences (checkbox, ~12 options)
 ```
 
-### Data Linking Strategy
+`ilp` — individual learning plans (loaded, not yet wired into UI)
 
-**Primary Link:** Faculty Name
-- `IMSLUFaculty$fac_name` ↔ `RDM2_0$faculty_evaluation$fac_fell_name` (residents evaluating faculty)
-- `IMSLUFaculty$fac_name` ↔ `RDM2_0$assessment$ass_faculty` (faculty evaluating residents)
+`questions` — attendance tracking
+```
+record_id            Resident
+q_date               Date
+q_rotation           Rotation
+```
 
-**Name Cleaning:** Use `clean_faculty_names()` for standardization (trim, title case, squish whitespace)
+`resident_data`
+```
+record_id, first_name, last_name, name, grad_yr
+type                 1=Preliminary, 2=Categorical, 3=Dismissed
+res_archive          0=active (~55 currently)
+coach                Coach assignment
+```
 
-**Known Name Mismatches:** 9 test names in evaluations not in faculty DB - this is expected test data
+### Linking strategy
 
-## File Organization
+Primary join field is faculty name:
+- `IMSLUFaculty$fac_name` ↔ `faculty_evaluation$fac_fell_name`
+- `IMSLUFaculty$fac_name` ↔ `assessment$ass_faculty`
+
+Use `clean_faculty_names()` for standardization (trim, title case, squish).
+Test names in evaluations (Mrs. Buttersworth, Mr. Bigglesworth, etc.) are
+expected legacy test data and will fail name matching by design.
+
+## File organization
 
 ```
 imslu_faculty_dashboard/
-├── app.R                    # Main Shiny app (or split to ui.R/server.R/global.R)
-├── global.R                 # Global setup, data loading
-├── Claude.md                # This file
+├── app.R                          # Main Shiny app
+├── global.R                       # Library loads + initial REDCap pull
+├── Claude.md                      # This file
 ├── README.md
-├── .gitignore              # Protects tokens, data files
-├── .Renviron               # API credentials (NOT in Git)
+├── manifest.json                  # Posit Connect deployment manifest
+├── .gitignore                     # Protects tokens, data, rsconnect
 │
 ├── R/
-│   ├── modules/            # Shiny modules
-│   │   ├── mod_login.R     # TO BUILD: Login/authentication
-│   │   ├── mod_faculty_eval.R  # TO BUILD: Faculty evaluations display
-│   │   ├── mod_student_eval.R  # PLACEHOLDER
-│   │   ├── mod_resident_workroom.R  # TO BUILD: Report cards, attendance
-│   │   ├── mod_teaching_portfolio.R # PLACEHOLDER
-│   │   ├── mod_educator_milestones.R # PLACEHOLDER
-│   │   └── mod_grand_rounds.R      # PLACEHOLDER
+│   ├── modules/
+│   │   ├── mod_login.R            # Auth + role determination
+│   │   ├── mod_faculty_eval.R     # Individual faculty's own evaluations
+│   │   └── mod_leader_dashboard.R # Aggregate view for admins/leaders
 │   │
-│   ├── utils/              # Utility functions
-│   │   ├── data_processing.R  # ✓ COMPLETE: REDCap download, cleaning
-│   │   ├── calculations.R     # TO BUILD: Means, aggregations
-│   │   └── plot_functions.R   # TO BUILD: Plotly visualizations
-│   │
-│   └── wrappers/           # Wrapper functions
-│       └── faculty_wrapper.R  # TO BUILD: Faculty-specific filtering
+│   └── utils/
+│       ├── data_processing.R      # REDCap pulls, division labels, name cleaning
+│       ├── calculations.R         # Means, aggregations, filtering by year
+│       └── plot_functions.R       # Plotly spider, bar charts, etc.
 │
-├── data/                   # Local test data (NOT in Git)
-│   ├── faculty_test.rds    # ✓ EXISTS: Cached faculty data
-│   └── rdm_test.rds        # ✓ EXISTS: Cached RDM data
+├── data/                          # Local test cache (gitignored)
+│   ├── faculty_test.rds
+│   └── rdm_test.rds
 │
-└── www/                    # Static assets (CSS, images)
+├── www/                           # Static assets (CSS, images)
+└── testing/                       # Diagnostic scripts (not part of app)
 ```
 
-## Key Functions Reference
+The `R/wrappers/` folder mentioned in older docs is not in use.
 
-### Data Processing (R/utils/data_processing.R) ✓ COMPLETE
+## Key functions
+
+### `R/utils/data_processing.R`
 
 ```r
-# Download functions
-download_faculty_data()           # Get IMSLUFaculty data
-download_rdm_focused()           # Get RDM forms (fast, single call)
-save_test_data()                 # Cache data locally
-load_test_data()                 # Load cached data
+download_faculty_data()           # IMSLUFaculty pull
+download_rdm_focused()            # RDM pull (single POST, separates forms)
+save_test_data()                  # Cache both to data/*.rds
+load_test_data()                  # Read cached rds
 
-# Cleaning functions
-clean_faculty_names(names)       # Standardize names
-assign_academic_year(dates)      # Convert dates to academic year
-get_current_academic_year()      # Get current academic year
-parse_checkbox_field(data, prefix) # Parse REDCap checkboxes
+clean_faculty_names(names)        # Trim, title case, squish
+assign_academic_year(dates)       # Date → "2024-2025" academic year string
+get_current_academic_year()       # Today's academic year
+parse_checkbox_field(data, prefix)# Collapse REDCap checkbox columns
 
-# Validation
-check_name_matching(faculty_data, rdm_data)  # Validate name links
+get_division_mapping()            # Read fac_div choices from REDCap data dict
+get_division_label(code)          # Numeric → label
+add_division_labels(faculty_data) # Append fac_div_label column
+
+check_name_matching(faculty, rdm) # Diagnostic: faculty-vs-eval name overlap
 ```
 
-### Academic Year Logic
-- Academic year: July 1 to June 30
-- Current academic year: 2025-2026 (as of Jan 2026)
-- Examples:
-  - 2024-06-30 → 2023-2024
-  - 2024-07-01 → 2024-2025
-  - 2025-01-06 → 2024-2025 (we're here)
+Division mapping is cached in `.GlobalEnv` after first call to avoid repeat
+metadata API hits. Has a fallback path if the metadata pull fails — the app
+still works, divisions just render as "Division N".
 
-## Development Tasks
+### `R/utils/calculations.R` (~715 lines)
 
-### 🔥 IMMEDIATE: Build Login Module
+Filtering, aggregation, and threshold helpers for both individual and
+aggregate views. See file for the full list.
 
-**File:** `R/modules/mod_login.R`
+### `R/utils/plot_functions.R` (~412 lines)
 
-**Requirements:**
-- For testing: Dropdown to select faculty (later will be access code input)
-- Validate against `faculty_redcap_data$fac_name`
-- Return reactive containing faculty info (record_id, fac_name, etc.)
-- Show welcome message on successful login
+Plotly builders: spider/radar, bar chart, conference attendance stacked bar.
 
-**Module Structure:**
-```r
-mod_login_ui <- function(id) {
-  ns <- NS(id)
-  # UI elements: selectInput for faculty, actionButton for login
-}
+## Academic year logic
 
-mod_login_server <- function(id, faculty_data) {
-  moduleServer(id, function(input, output, session) {
-    # Return reactive faculty_info()
-  })
-}
-```
+- Academic year runs July 1 → June 30
+- Current: 2025-2026 (as of June 2026)
+- `2024-06-30` → `"2023-2024"`
+- `2024-07-01` → `"2024-2025"`
+- Handles both `Date` and REDCap numeric `YYYYM` format
 
-**Integration in app.R:**
-```r
-# In server:
-faculty_info <- mod_login_server("login", faculty_redcap_data)
+## Development workflow
 
-# Hide tabs until logged in:
-observe({
-  if (is.null(faculty_info())) {
-    hideTab(inputId = "sidebar", target = "eval_tab")
-  } else {
-    showTab(inputId = "sidebar", target = "eval_tab")
-    updateTabItems(session, "sidebar", "eval_tab")
-  }
-})
-```
-
-### 📊 NEXT: Faculty Evaluation Module
-
-**File:** `R/modules/mod_faculty_eval.R`
-
-**Requirements:**
-
-1. **Data Filtering:**
-   - Filter `faculty_evaluation` where `fac_fell_name` matches logged-in faculty
-   - Apply academic year filter (current year vs. all time)
-   - Check minimum 5 evaluations per period
-   - Apply 6-month delay: `eval_date <= today() - months(6)`
-
-2. **Calculations (need R/utils/calculations.R):**
-   ```r
-   calculate_faculty_eval_means(eval_data, domains = c("time_teaching", "att_overall"))
-   calculate_all_faculty_means(rdm_data)  # For comparison
-   ```
-
-3. **UI Components:**
-   - Time filter: Radio buttons (Current Year / All Time)
-   - Summary table: This Faculty | All Faculty | Difference
-   - Spider plot: Plotly radar chart comparing faculty vs. mean
-   - Plus/Delta tables: Sortable, searchable DT::datatable
-
-4. **Evaluation Domains to Display:**
-   - Time for Teaching (`time_teaching`)
-   - Overall Teaching (`att_overall`)
-   - Extra Teaching (`att_ext_tea`)
-   - Feedback Quality (`att_give_feed`)
-
-### 🔧 Supporting Files Needed
-
-**R/utils/calculations.R:**
-```r
-# Calculate mean scores for evaluation domains
-calculate_faculty_eval_means <- function(eval_data, faculty_name = NULL) {
-  # If faculty_name provided: filter and calculate means for that faculty
-  # If NULL: calculate means across all faculty (for comparison)
-  # Return: data frame with domain names and mean scores
-}
-
-# Filter by academic year
-filter_by_academic_year <- function(data, year = "current") {
-  # year can be "current", "all", or specific "2024-2025"
-}
-
-# Apply time delay filter
-apply_time_delay <- function(data, date_col, delay_months = 6) {
-  # Filter out records within delay_months of today
-}
-
-# Check minimum threshold
-check_minimum_threshold <- function(data, threshold = 5) {
-  # Return TRUE if nrow(data) >= threshold
-}
-```
-
-**R/utils/plot_functions.R:**
-```r
-# Create Plotly spider/radar plot
-create_spider_plot <- function(faculty_means, comparison_means, domains) {
-  # Use plot_ly(type = 'scatterpolar')
-  # Two traces: This Faculty vs. All Faculty
-  # Return: plotly object
-}
-
-# Create comparison table
-create_eval_comparison_table <- function(faculty_means, all_means) {
-  # Create DT::datatable with:
-  # Columns: Domain | This Faculty | All Faculty | Difference
-  # Color code differences (green if above, red if below)
-}
-```
-
-### 🏠 Resident Work-Room Module
-
-**File:** `R/modules/mod_resident_workroom.R`
-
-**Sub-features:**
-
-1. **Resident Report Cards:**
-   - Multi-select picker for residents
-   - Display cards showing:
-     - Learning styles from `s_e_learn_style___*`
-     - Topics needing work from `s_e_topic_sel___*`
-   - Use highest `redcap_repeat_instance` per resident
-
-2. **Team Attendance:**
-   - Date range picker (default to current week)
-   - Table showing residents, rotations, dates from `questions` form
-   - Visual attendance grid
-
-3. **Observation Matrix:**
-   - Heatmap showing observation completion by resident
-   - Parse `ass_obs_*` fields from assessment form
-   - Highlight areas needing observations
-
-## Development Workflow
-
-### 1. Working with Cached Data
-
-During development, use cached data to avoid API calls:
+### Working offline
 
 ```r
-# In global.R
+# In global.R, swap the live pull for cached:
 test_data <- load_test_data()
 faculty_redcap_data <- test_data$faculty
 rdm_redcap_data <- test_data$rdm
-```
 
-To refresh test data:
-```r
+# To refresh the cache:
 source("R/utils/data_processing.R")
-save_test_data()  # Takes ~5 seconds
+save_test_data()
 ```
 
-### 2. Git Workflow
-
-```bash
-# Start new feature
-git checkout -b feature/login-module
-# ... develop ...
-git add R/modules/mod_login.R
-git commit -m "Add login module with faculty selection"
-git push -u origin feature/login-module
-
-# Merge when complete
-git checkout main
-git merge feature/login-module
-git push
-```
-
-### 3. Testing Strategy
+### Running locally
 
 ```r
-# Test individual module in console
-source("R/modules/mod_login.R")
-source("R/utils/data_processing.R")
-
-test_data <- load_test_data()
-# Test module functions here
+shiny::runApp()
+# Or in Positron: source app.R then runApp() at the bottom
 ```
 
-## Module Template
+### Branch / commit
 
-Use this template for new modules:
+Per global conventions: imperative tense, ≤50-char subject. Examples from
+this repo: `Add production mode`, `Implement full drill-down in leadership dashboard`,
+`Restructure evaluation domains to use correct 1-5 scale fields`.
+
+## Module template
 
 ```r
-# UI Function
-mod_[name]_ui <- function(id) {
+mod_<name>_ui <- function(id) {
   ns <- NS(id)
-  
-  fluidRow(
-    column(
-      width = 12,
-      box(
-        title = "[Module Title]",
-        width = 12,
-        # UI elements here
-      )
-    )
+  tagList(
+    # bs4Card / fluidRow / column / value boxes / outputs
   )
 }
 
-# Server Function
-mod_[name]_server <- function(id, faculty_info, rdm_data) {
+mod_<name>_server <- function(id, faculty_info, rdm_data, faculty_data) {
   moduleServer(id, function(input, output, session) {
-    
-    # Reactive data filtering
+
     filtered_data <- reactive({
       req(faculty_info())
-      # Filter logic here
+      # Filter by faculty_info()$accessible_faculty
     })
-    
-    # Outputs
+
     output$something <- renderPlotly({ ... })
-    
-    # Return value if needed
-    return(reactive({ ... }))
+
+    # Return reactive if needed
   })
 }
 ```
 
-## Important Constants
+## Important constants
 
 ```r
-# In global.R or calculations.R
-MIN_EVALUATIONS <- 5           # Minimum evals per period to display
-EVALUATION_DELAY_MONTHS <- 6   # Delay before showing evaluations
-CURRENT_ACADEMIC_YEAR <- "2025-2026"
+MIN_EVALUATIONS         <- 5            # Min evals per period to display
+EVALUATION_DELAY_MONTHS <- 6            # Delay before showing recent evals
 
-# Rating scales
-TEACHING_SCALE <- c("1" = "Never ensures time",
-                    "2" = "",
-                    "3" = "Occasionally ensures time", 
-                    "4" = "",
-                    "5" = "Always ensures time")
-
-OVERALL_SCALE <- c("1" = "Needs improvement",
-                   "2" = "Satisfactory",
-                   "3" = "Good",
-                   "4" = "Very good",
-                   "5" = "Outstanding")
+TEACHING_SCALE <- c("1" = "Never ensures time", "3" = "Occasionally", "5" = "Always")
+OVERALL_SCALE  <- c("1" = "Needs improvement", "2" = "Satisfactory",
+                    "3" = "Good", "4" = "Very good", "5" = "Outstanding")
 ```
 
-## Styling Preferences
+## Styling preferences
 
-- **Plots:** Plotly (interactive) over ggplot (static)
-- **Tables:** DT::datatable with pageLength = 10, searching = TRUE
-- **Colors:** Use shinydashboard color palette (blue, green, yellow, red, purple)
-- **Layout:** Use `fluidRow` and `column` for responsive design
-- **Value boxes:** For summary statistics
+- Plotly for interactive, ggplot for static
+- DT::datatable: `pageLength = 10`, `searching = TRUE`
+- bs4Dash status colors: primary, success, warning, danger
+- Value boxes for summary stats
+- Spider plot for multi-domain comparisons
 
-## Security Notes
+## Security
 
 **Never commit:**
-- `.Renviron` (contains API tokens)
-- `data/*.rds` (contains PHI)
-- Any files with actual faculty/resident names or data
+- `.Renviron` (tokens)
+- `data/*.rds` (PHI)
+- `rsconnect/`
 
-**Check .gitignore includes:**
-```
-.Renviron
-data/
-*.rds
-rsconnect/
-```
+`.gitignore` should include all of the above plus `.Renviron.local`, `*.env`.
 
-## Testing Data Notes
+In code, always `Sys.getenv("VAR_NAME")` — never hardcoded values.
 
-- Test names in evaluations (Mrs Buttersworth, Mr. Bigglesworth, etc.) are expected
-- 30 real faculty being evaluated with 1,404 total evaluations
-- Active faculty: 179 out of 237
-- Active residents: 55 out of 194
+## Deployment
 
-## Future Phases (Not Current Priority)
+- Push to `main` → Posit Connect Cloud auto-deploys via the connected GitHub repo
+- `manifest.json` must be current (run `rsconnect::writeManifest()` after dependency changes)
+- Required Connect env vars: `PRODUCTION_MODE`, `FAC_TOKEN`, `RDM_TOKEN`, `REDCAP_URL`
+- Connect uses its own R + package versions per manifest; `renv` is local-only
 
-- Student evaluations (placeholder)
-- Teaching portfolio tracking (placeholder)
-- Clinical educator milestones (placeholder)
-- Grand rounds attendance (placeholder)
-- Program-level dashboard with drill-down
-
-## Quick Reference Commands
+## Quick reference
 
 ```r
-# Reload all functions
+# Reload everything
 source("global.R")
 
-# Run app
+# Run
 shiny::runApp()
 
-# Refresh test data
-source("R/utils/data_processing.R")
-save_test_data()
+# Refresh cache
+source("R/utils/data_processing.R"); save_test_data()
 
-# Check name matching
+# Diagnostic name match
 check_name_matching(faculty_redcap_data, rdm_redcap_data)
 
-# Test academic year calculation
-assign_academic_year("2025-01-06")  # Returns "2024-2025"
+# Academic year sanity check
+assign_academic_year("2025-01-06")  # → "2024-2025"
 ```
 
-## Questions to Ask When Building
+## Getting help
 
-1. **Data filtering:** What's the primary key/linking field?
-2. **Calculations:** Individual or aggregate? Current year or all time?
-3. **Visualization:** Static or interactive? What comparison is needed?
-4. **User interaction:** What filters/selectors are needed?
-5. **Performance:** Using cached data or live API calls?
+- Architecture / planning: `~/Library/Cowork/faculty-dashboard-v1-launch/`
+- REDCap field references: REDCap data dictionary (download via REDCap UI)
+- Similar viz patterns: `gmed/` and the sibling apps (`imslu.ind.dash`, `imslu.coach.dash`, `imslu.ccc.dashboard`)
+- Diagnostic scripts: `testing/` folder
 
-## Success Criteria
+## gmed dependency status
 
-**Phase 1 Complete When:**
-- ✅ Faculty can log in (select their name)
-- ✅ Faculty see only their evaluations
-- ✅ Evaluation means calculated correctly
-- ✅ Spider plot shows faculty vs. all-faculty comparison
-- ✅ Plus/Delta comments displayed in searchable tables
-- ✅ Academic year filtering works
-- ✅ Resident report cards display learning styles and topics
-- ✅ Attendance tracking shows weekly view
-- ✅ Observation matrix identifies gaps
-
-## Getting Help
-
-- **Data questions:** Check this Claude.md
-- **REDCap structure:** See data dictionary files in /mnt/project/
-- **Examples:** Look at gmed repository for similar visualizations
-- **Testing:** Use diagnostic.R or test_connection_v2.R scripts
-
----
-
-**Last Updated:** January 6, 2026
-**Current Version:** v0.1 (minimal app with data display)
-**Next Milestone:** v0.2 (add login module)
+This app does NOT currently depend on the `gmed` package — it rolled its own
+data processing, calculations, and plotting helpers. Phase 2 will migrate the
+obvious shared bits (`assign_academic_year`, `get_current_academic_year`,
+division-label lookup) into `gmed` for reuse across the sibling apps. See
+`~/Library/Cowork/faculty-dashboard-v1-launch/decisions.md` D2 for rationale.

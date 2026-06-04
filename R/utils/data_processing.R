@@ -11,7 +11,7 @@ library(httr)
 download_faculty_data <- function() {
   result <- REDCapR::redcap_read(
     redcap_uri = Sys.getenv("REDCAP_URL"),
-    token = Sys.getenv("FACULTY_REDCAP_TOKEN")
+    token = Sys.getenv("FAC_TOKEN")
   )
   
   return(result$data)
@@ -24,7 +24,7 @@ download_rdm_focused <- function(faculty_data = NULL) {
   # Use direct httr::POST for cleaner form filtering
   # rawOrLabel='raw' keeps data as-is (no conversion to display labels)
   formData <- list(
-    "token" = Sys.getenv("RDM_REDCAP_TOKEN"),
+    "token" = Sys.getenv("RDM_TOKEN"),
     content = 'record',
     action = 'export',
     format = 'csv',
@@ -141,7 +141,7 @@ get_division_mapping <- function() {
     # Download metadata
     metadata_result <- REDCapR::redcap_metadata_read(
       redcap_uri = Sys.getenv("REDCAP_URL"),
-      token = Sys.getenv("FACULTY_REDCAP_TOKEN")
+      token = Sys.getenv("FAC_TOKEN")
     )
 
     # Check if successful
