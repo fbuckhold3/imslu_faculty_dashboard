@@ -23,3 +23,5 @@ data/
 # OS specific
 .DS_Store
 Thumbs.db
+# Generated report output
+reports/output/

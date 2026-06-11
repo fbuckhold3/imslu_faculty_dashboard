@@ -1,0 +1,703 @@
+---
+title: "Leadership Dashboard"
+subtitle: "All Faculty & Fellows — Department of Internal Medicine"
+params:
+  faculty_rds: ""    # path to pre-fetched faculty RDS (passed by render scripts)
+  rdm_rds: ""        # path to pre-fetched RDM RDS
+format:
+  html:
+    self-contained: true
+    theme: flatly
+    page-layout: full
+    toc: true
+    toc-location: left
+    toc-title: "Contents"
+    toc-depth: 2
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+
+library(tidyverse)
+library(knitr)
+library(DT)
+library(jsonlite)
+library(htmltools)
+
+source(here::here("R/utils/data_processing.R"))
+source(here::here("R/utils/calculations.R"))
+source(here::here("R/utils/plot_functions.R"))
+
+# ── Load data ──────────────────────────────────────────────────────────────────
+if (nchar(params$faculty_rds) > 0 && file.exists(params$faculty_rds)) {
+  faculty_data <- readRDS(params$faculty_rds)
+  rdm_data     <- readRDS(params$rdm_rds)
+} else if (Sys.getenv("PRODUCTION_MODE") == "TRUE") {
+  faculty_data <- download_faculty_data()
+  rdm_data     <- download_rdm_focused()
+} else {
+  td           <- load_test_data()
+  faculty_data <- td$faculty
+  rdm_data     <- td$rdm
+}
+
+# ── Division label map ─────────────────────────────────────────────────────────
+DIV_LABELS <- c(
+  "1"  = "Addiction Medicine",   "2"  = "Allergy",
+  "3"  = "Cardiology",           "4"  = "Endocrinology",
+  "5"  = "Gastroenterology",     "6"  = "Geriatrics",
+  "7"  = "GIM - Hospitalist",    "8"  = "GIM - Primary Care",
+  "9"  = "Hematology / Oncology","10" = "Infectious Disease",
+  "11" = "Nephrology",           "12" = "Palliative Care",
+  "13" = "Pulmonary / Critical Care", "14" = "Rheumatology",
+  "15" = "Other"
+)
+
+# ── Domain label map ───────────────────────────────────────────────────────────
+DOMAIN_MAP <- c(
+  "approachability" = "Approachability",
+  "respect"         = "Respect",
+  "bedside_manner"  = "Bedside Manner",
+  "time_teaching"   = "Time for Teaching",
+  "ques_clin_des"   = "Clinical Reasoning",
+  "autonomy"        = "Autonomy",
+  "feedback"        = "Feedback",
+  "organ"           = "Organization"
+)
+
+# ── All active faculty and fellows ────────────────────────────────────────────
+pd_people <- faculty_data |>
+  filter(
+    archived == 0 | is.na(archived),
+    record_id != 1,
+    !is.na(fac_name), nchar(trimws(fac_name)) > 0,
+    !fac_name %in% c("Pending", "pending")
+  ) |>
+  mutate(
+    fac_name      = clean_faculty_names(fac_name),
+    fac_div       = as.character(fac_div),
+    div_label     = coalesce(DIV_LABELS[fac_div], paste0("Division ", fac_div)),
+    fac_meded_fte = suppressWarnings(as.numeric(fac_meded_fte)),
+    person_type   = if_else(fac_fell == 2, "Fellow", "Faculty", missing = "Faculty")
+  ) |>
+  arrange(div_label, person_type, fac_name)
+
+all_person_names <- pd_people$fac_name
+
+current_year <- get_current_academic_year()
+
+# ── Eval & assessment data ─────────────────────────────────────────────────────
+fac_eval <- rdm_data$faculty_evaluation |>
+  mutate(
+    fac_fell_name   = clean_faculty_names(fac_fell_name),
+    att_overall     = suppressWarnings(as.numeric(att_overall)),
+    approachability = suppressWarnings(as.numeric(approachability)),
+    respect         = suppressWarnings(as.numeric(respect)),
+    bedside_manner  = suppressWarnings(as.numeric(bedside_manner)),
+    time_teaching   = suppressWarnings(as.numeric(time_teaching)),
+    ques_clin_des   = suppressWarnings(as.numeric(ques_clin_des)),
+    autonomy        = suppressWarnings(as.numeric(autonomy)),
+    feedback        = suppressWarnings(as.numeric(feedback)),
+    organ           = suppressWarnings(as.numeric(organ))
+  )
+
+assessment <- rdm_data$assessment |>
+  mutate(ass_faculty = clean_faculty_names(ass_faculty))
+
+# Current-year evals and assessments (all people)
+all_person_evals_curr <- fac_eval |>
+  filter(fac_fell_name %in% all_person_names) |>
+  filter_by_academic_year(date_col = "fac_eval_date", year = current_year)
+
+all_person_assess_curr <- assessment |>
+  filter(ass_faculty %in% all_person_names) |>
+  filter_by_academic_year(date_col = "ass_date", year = current_year)
+
+# ── Summary stats ──────────────────────────────────────────────────────────────
+n_people       <- nrow(pd_people)
+n_fellows      <- sum(pd_people$person_type == "Fellow")
+n_faculty      <- sum(pd_people$person_type == "Faculty")
+n_total_evals  <- nrow(all_person_evals_curr)
+n_total_assess <- nrow(all_person_assess_curr)
+dept_overall   <- if (n_total_evals > 0) round(mean(all_person_evals_curr$att_overall, na.rm = TRUE), 2) else NA
+
+# ── Per-division domain means (comparison baseline in expandable rows) ─────────
+divisions_present <- unique(pd_people$fac_div[!is.na(pd_people$fac_div)])
+
+div_means_all <- setNames(lapply(divisions_present, function(div) {
+  div_names <- pd_people |> filter(fac_div == div) |> pull(fac_name)
+  div_ev    <- all_person_evals_curr |> filter(fac_fell_name %in% div_names)
+  if (nrow(div_ev) < MIN_EVALUATIONS) return(setNames(rep(NA_real_, length(DOMAIN_MAP)), names(DOMAIN_MAP)))
+  sapply(names(DOMAIN_MAP), function(d) {
+    if (d %in% names(div_ev)) round(mean(div_ev[[d]], na.rm = TRUE), 2) else NA_real_
+  })
+}), divisions_present)
+
+# ── Assessment by resident level (dept-wide) ──────────────────────────────────
+level_map <- c("1" = "Intern", "2" = "PGY-2", "3" = "PGY-3",
+               "4" = "Graduated", "5" = "Rotator")
+
+assess_by_level <- all_person_assess_curr |>
+  filter(!is.na(ass_level)) |>
+  mutate(level_label = level_map[as.character(ass_level)]) |>
+  count(level_label) |>
+  arrange(match(level_label, c("Intern", "PGY-2", "PGY-3", "Rotator", "Graduated")))
+
+# ── Synthesis cache (Feedback on Your Feedback) ───────────────────────────────
+synth_cache_path <- here::here("data", "synthesis_cache.rds")
+synth_cache      <- if (file.exists(synth_cache_path)) readRDS(synth_cache_path) else NULL
+
+get_synthesis_html <- function(nm) {
+  if (is.null(synth_cache)) return(NULL)
+  prefix   <- paste0(nm, "::synthesis_v3::")
+  fac_keys <- names(synth_cache)[startsWith(names(synth_cache), prefix)]
+  if (length(fac_keys) == 0) return(NULL)
+
+  # Most-recent snapshot by date suffix in key
+  date_suffix <- vapply(fac_keys, function(k) {
+    parts     <- strsplit(k, "::", fixed = TRUE)[[1]]
+    last_part <- parts[length(parts)]
+    date_part <- sub(".*__", "", last_part)
+    if (grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", date_part)) date_part else "0000-00-00"
+  }, character(1))
+
+  latest_key <- fac_keys[order(date_suffix, nchar(fac_keys), decreasing = TRUE)[1]]
+
+  tryCatch({
+    # PD view shows only the PD coaching note — not the full faculty-facing
+    # synthesis (cards, themes, growth pointers). Requires gmed >= 0.2.5.
+    h <- gmed::render_synthesis_pd_note_html(synth_cache[[latest_key]])
+    if (is.null(h)) return(NULL)
+    # unbox so toJSON emits a plain string (auto_unbox alone is not enough
+    # for values built outside the list literal)
+    jsonlite::unbox(paste0(as.character(h), collapse = ""))
+  }, error = function(e) NULL)
+}
+
+# ── Per-person detail for expandable rows ─────────────────────────────────────
+member_details <- setNames(lapply(seq_len(nrow(pd_people)), function(i) {
+  row  <- pd_people[i, ]
+  nm   <- row$fac_name
+  div  <- row$fac_div
+
+  ev   <- all_person_evals_curr  |> filter(fac_fell_name == nm)
+  ass  <- all_person_assess_curr |> filter(ass_faculty   == nm)
+  n_ev <- nrow(ev)
+
+  div_means <- div_means_all[[div]]
+
+  domain_list <- if (n_ev >= MIN_EVALUATIONS) {
+    lapply(names(DOMAIN_MAP), function(d) list(
+      label = unname(DOMAIN_MAP[d]),
+      score = if (d %in% names(ev)) round(mean(ev[[d]], na.rm = TRUE), 2) else NA,
+      div   = if (!is.null(div_means)) unname(div_means[d]) else NA
+    ))
+  } else list()
+
+  list(
+    n_evals        = n_ev,
+    avg_overall    = if (n_ev >= MIN_EVALUATIONS) round(mean(ev$att_overall, na.rm = TRUE), 2) else NA,
+    n_assess       = nrow(ass),
+    division       = coalesce(row$div_label, "Unknown"),
+    person_type    = row$person_type,
+    has_domains    = n_ev >= MIN_EVALUATIONS,
+    domains        = domain_list,
+    plus           = as.list(ev |> filter(!is.na(plus),  nchar(trimws(plus))  > 0) |> pull(plus)),
+    delta          = as.list(ev |> filter(!is.na(delta), nchar(trimws(delta)) > 0) |> pull(delta)),
+    synthesis_html = get_synthesis_html(nm)
+  )
+}), pd_people$fac_name)
+
+# null = "null" so a missing synthesis serializes as JSON null (falsy in JS),
+# not {} (truthy) — {} made the Notes on Feedback section render "[object Object]"
+detail_json <- jsonlite::toJSON(member_details, auto_unbox = TRUE,
+                                na = "null", null = "null")
+
+# ── Med Ed role mapping + per-person roles ────────────────────────────────────
+get_meded_mapping <- function() {
+  tryCatch({
+    url   <- Sys.getenv("REDCAP_URL")
+    token <- Sys.getenv("FAC_TOKEN")
+    if (nchar(url) == 0 || nchar(token) == 0) return(NULL)
+    result <- REDCapR::redcap_metadata_read(redcap_uri = url, token = token)
+    if (!result$success) return(NULL)
+    row <- result$data[result$data$field_name == "fac_med_ed", ]
+    if (nrow(row) == 0) return(NULL)
+    pairs  <- trimws(strsplit(row$select_choices_or_calculations[1], "\\|")[[1]])
+    codes  <- sub(",.*", "", pairs) |> trimws()
+    labels <- sub("^[^,]+,\\s*", "", pairs) |> trimws()
+    setNames(labels, codes)
+  }, error = function(e) NULL)
+}
+
+meded_map  <- get_meded_mapping()
+meded_cols <- grep("^fac_med_ed___", names(pd_people), value = TRUE)
+
+meded_roles_vec <- sapply(seq_len(nrow(pd_people)), function(i) {
+  row   <- pd_people[i, ]
+  codes <- sub("^fac_med_ed___", "", meded_cols[
+    sapply(meded_cols, function(col) isTRUE(as.integer(row[[col]]) == 1L))
+  ])
+  if (length(codes) == 0) return("")
+  if (!is.null(meded_map)) {
+    lbls <- meded_map[codes]
+    lbls <- lbls[!is.na(lbls)]
+    if (length(lbls) > 0) return(paste(unname(lbls), collapse = "; "))
+  }
+  paste(codes, collapse = "; ")
+})
+
+# ── Summary table ─────────────────────────────────────────────────────────────
+fellow_summary <- map_dfr(seq_len(nrow(pd_people)), function(i) {
+  row <- pd_people[i, ]
+  nm  <- row$fac_name
+  ev  <- all_person_evals_curr  |> filter(fac_fell_name == nm)
+  ass <- all_person_assess_curr |> filter(ass_faculty   == nm)
+  tibble(
+    ` `                 = "▶",
+    Name                = nm,
+    Type                = row$person_type,
+    Division            = coalesce(row$div_label, "Unknown"),
+    `Med Ed Role`       = meded_roles_vec[i],
+    `Evals Received`    = nrow(ev),
+    `Avg Overall`       = if (nrow(ev) >= MIN_EVALUATIONS)
+                            round(mean(ev$att_overall, na.rm = TRUE), 2)
+                          else NA_real_,
+    `Assessments Given` = nrow(ass)
+  )
+})
+
+# (Filter options are populated dynamically in JS from the table data)
+
+# ── DT callback JS ────────────────────────────────────────────────────────────
+callback_js <- paste0(
+"var MIN_EVALS = ", MIN_EVALUATIONS, ";
+var detailData = ", detail_json, ";
+
+function escH(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function buildDetail(d) {
+  var avg = (d.avg_overall === null || d.avg_overall === undefined)
+    ? '&lt; ' + MIN_EVALS + ' evals'
+    : parseFloat(d.avg_overall).toFixed(2) + ' / 5';
+
+  var h = '<div class=\"dp-wrap\">';
+
+  // Type badge + Division badge + stat boxes
+  var typeCol = (d.person_type === 'Fellow') ? '#5b6abf' : '#1a6496';
+  h += '<div class=\"dp-div-badge\" style=\"background:' + typeCol + ';margin-right:0.4rem;\">'
+     + escH(d.person_type) + '</div>';
+  h += '<div class=\"dp-div-badge\">' + escH(d.division) + '</div>';
+  h += '<div class=\"dp-stats\">'
+     + '<div class=\"dp-stat\"><div class=\"dp-val\">' + d.n_evals + '</div><div class=\"dp-lbl\">Evals Received</div></div>'
+     + '<div class=\"dp-stat\"><div class=\"dp-val\">' + avg + '</div><div class=\"dp-lbl\">Avg Overall</div></div>'
+     + '<div class=\"dp-stat\"><div class=\"dp-val\">' + d.n_assess + '</div><div class=\"dp-lbl\">Assessments Given</div></div>'
+     + '</div>';
+
+  // Domain scores vs division average
+  if (d.has_domains && d.domains && d.domains.length > 0) {
+    h += '<div class=\"dp-section\"><div class=\"dp-sec-hd\">Domain Scores vs Division Average</div>'
+       + '<table class=\"dp-dtbl\">';
+    d.domains.forEach(function(dm) {
+      if (dm.score === null || dm.score === undefined) return;
+      var pct  = Math.min(parseFloat(dm.score) / 5 * 100, 100).toFixed(1);
+      var dpct = (dm.div !== null && dm.div !== undefined)
+                  ? Math.min(parseFloat(dm.div) / 5 * 100, 100).toFixed(1) : null;
+      var diff = (dm.div !== null && dm.div !== undefined)
+                  ? parseFloat(dm.score) - parseFloat(dm.div) : null;
+      var diffStr = diff !== null ? ((diff >= 0 ? '+' : '') + diff.toFixed(2)) : '';
+      var diffCol = diff !== null ? (diff >= 0 ? '#2a9d49' : '#d73027') : '#888';
+      h += '<tr>'
+         + '<td class=\"dp-dl\">' + escH(dm.label) + '</td>'
+         + '<td class=\"dp-db\"><div class=\"dp-bg\">'
+         +   '<div class=\"dp-fill\" style=\"width:' + pct + '%\"></div>'
+         +   (dpct !== null ? '<div class=\"dp-dline\" style=\"left:' + dpct + '%\"></div>' : '')
+         + '</div></td>'
+         + '<td class=\"dp-ds\">' + parseFloat(dm.score).toFixed(2) + '</td>'
+         + '<td class=\"dp-dd\" style=\"color:' + diffCol + '\">' + diffStr + '</td>'
+         + '</tr>';
+    });
+    h += '</table>'
+       + '<div class=\"dp-lgd\"><span class=\"dp-lgd-bar\"></span>&nbsp;Score &nbsp;|&nbsp; '
+       + '<span class=\"dp-lgd-line\"></span>&nbsp;Div avg &nbsp;|&nbsp; Diff = vs div avg</div>'
+       + '</div>';
+  }
+
+  // Feedback
+  h += '<div class=\"dp-section dp-fb\">';
+  h += '<div class=\"dp-fbc dp-plus\"><div class=\"dp-sec-hd\">&#10003; Strengths</div>';
+  if (d.plus && d.plus.length > 0) {
+    d.plus.forEach(function(t) { h += '<div class=\"dp-q\">' + escH(t) + '</div>'; });
+  } else { h += '<em class=\"dp-none\">None recorded this year</em>'; }
+  h += '</div>';
+
+  h += '<div class=\"dp-fbc dp-delta\"><div class=\"dp-sec-hd\">&#9651; Growth Areas</div>';
+  if (d.delta && d.delta.length > 0) {
+    d.delta.forEach(function(t) { h += '<div class=\"dp-q\">' + escH(t) + '</div>'; });
+  } else { h += '<em class=\"dp-none\">None recorded this year</em>'; }
+  h += '</div>';
+  h += '</div>'; // dp-fb
+
+  // Feedback on Your Feedback synthesis (from AI analysis of free-text comments)
+  if (d.synthesis_html) {
+    h += '<div class=\"dp-section dp-synthesis\">'
+       + '<div class=\"dp-sec-hd\">Notes on Feedback</div>'
+       + '<div class=\"dp-synth-body\">' + d.synthesis_html + '</div>'
+       + '</div>';
+  }
+
+  h += '</div>'; // dp-wrap
+  return h;
+}
+
+// ── Multi-select filter logic ────────────────────────────────────────────────
+// col indices: ▶=0, Name=1, Type=2, Division=3, Med Ed Role=4, Evals=5, Avg=6, Assessments=7
+$.fn.dataTable.ext.search.push(function(settings, data, dataIndex) {
+  if (!document.getElementById('pd-div-filter')) return true;
+
+  var selDivs = Array.from(
+    document.querySelectorAll('#pd-div-filter option:checked')
+  ).map(function(o) { return o.value; });
+
+  var selRoles = Array.from(
+    document.querySelectorAll('#pd-meded-filter option:checked')
+  ).map(function(o) { return o.value; });
+
+  var selTypes = Array.from(
+    document.querySelectorAll('#pd-type-filter option:checked')
+  ).map(function(o) { return o.value; });
+
+  var synthOnly = document.getElementById('pd-synth-filter') &&
+                  document.getElementById('pd-synth-filter').checked;
+
+  var typeOk = selTypes.length === 0 || selTypes.indexOf(data[2]) !== -1;
+  var divOk  = selDivs.length  === 0 || selDivs.indexOf(data[3]) !== -1;
+  var roleStr = String(data[4] || '');
+  var roleOk  = selRoles.length === 0 || selRoles.some(function(r) {
+    return roleStr.split('; ').indexOf(r) !== -1;
+  });
+
+  var synthOk = true;
+  if (synthOnly) {
+    var name = String(data[1] || '').replace(/<[^>]*>/g, '').trim();
+    synthOk = !!(detailData[name] && detailData[name].synthesis_html);
+  }
+
+  return typeOk && divOk && roleOk && synthOk;
+});
+
+// ── Populate filter dropdowns directly (DOMContentLoaded has already fired) ──
+var typeSel  = document.getElementById('pd-type-filter');
+var divSel   = document.getElementById('pd-div-filter');
+var mededSel = document.getElementById('pd-meded-filter');
+var synthChk = document.getElementById('pd-synth-filter');
+var clrBtn   = document.getElementById('pd-filter-clear');
+
+var types = [], divs = [], mededs = [];
+table.rows().every(function() {
+  var d     = this.data();
+  var t     = String(d[2] || '').trim();
+  var v     = String(d[3] || '').trim();
+  var roles = String(d[4] || '').split('; ');
+  if (t && types.indexOf(t) === -1) types.push(t);
+  if (v && divs.indexOf(v)  === -1) divs.push(v);
+  roles.forEach(function(r) {
+    r = r.trim();
+    if (r && mededs.indexOf(r) === -1) mededs.push(r);
+  });
+});
+types.sort().forEach(function(t) {
+  var o = document.createElement('option'); o.value = t; o.textContent = t;
+  typeSel.appendChild(o);
+});
+divs.sort().forEach(function(d) {
+  var o = document.createElement('option'); o.value = d; o.textContent = d;
+  divSel.appendChild(o);
+});
+mededs.sort().forEach(function(r) {
+  var o = document.createElement('option'); o.value = r; o.textContent = r;
+  mededSel.appendChild(o);
+});
+
+typeSel.addEventListener('change',   function() { table.draw(); });
+divSel.addEventListener('change',    function() { table.draw(); });
+mededSel.addEventListener('change',  function() { table.draw(); });
+if (synthChk) synthChk.addEventListener('change', function() { table.draw(); });
+if (clrBtn)   clrBtn.addEventListener('click', function() {
+  Array.from(typeSel.options).forEach(function(o)  { o.selected = false; });
+  Array.from(divSel.options).forEach(function(o)   { o.selected = false; });
+  Array.from(mededSel.options).forEach(function(o) { o.selected = false; });
+  if (synthChk) synthChk.checked = false;
+  table.draw();
+});
+
+// ── Row expand/collapse ──────────────────────────────────────────────────────
+table.on('click', 'tbody tr', function() {
+  var row = table.row(this);
+  if (!row.length) return;
+  var name = String(row.data()[1] || '').replace(/<[^>]*>/g,'').trim();
+  var d = detailData[name];
+
+  if (row.child.isShown()) {
+    row.child.hide();
+    $(this).find('td:first').text('\\u25b6');
+    $(this).removeClass('dp-open');
+  } else {
+    var content = d
+      ? buildDetail(d)
+      : '<em style=\"padding:1rem;display:block\">No data for ' + escH(name) + '</em>';
+    row.child('<td colspan=\"99\" style=\"padding:0;border-top:none\">' + content + '</td>').show();
+    $(this).find('td:first').text('\\u25bc');
+    $(this).addClass('dp-open');
+  }
+});
+")
+```
+
+```{=html}
+<style>
+/* ── Detail panel ─────────────────────────────────────────── */
+.dp-wrap { padding:1rem 1.25rem; background:#f8f9fa; border-bottom:2px solid #dee2e6; }
+
+.dp-div-badge { display:inline-block; background:#1a6496; color:white;
+                font-size:0.75rem; padding:0.2rem 0.6rem; border-radius:10px;
+                margin-bottom:0.6rem; font-weight:600; }
+
+.dp-stats { display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap; }
+.dp-stat  { background:white; border-radius:6px; padding:0.6rem 1rem;
+            border-left:3px solid #2c7bb6; min-width:130px; }
+.dp-val   { font-size:1.3rem; font-weight:700; color:#2c7bb6; }
+.dp-lbl   { font-size:0.75rem; color:#666; margin-top:0.1rem; }
+
+.dp-section   { margin-bottom:1rem; }
+.dp-sec-hd    { font-size:0.8rem; font-weight:600; color:#444; text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.45rem;
+                border-bottom:1px solid #e0e0e0; padding-bottom:0.2rem; }
+
+.dp-dtbl  { width:100%; border-collapse:collapse; font-size:0.83rem; }
+.dp-dtbl tr:hover { background:#e8f0f8; }
+.dp-dl    { width:170px; padding:0.2rem 0.4rem; font-weight:500; }
+.dp-db    { padding:0.2rem 0.4rem; min-width:180px; }
+.dp-bg    { height:11px; background:#e0e0e0; border-radius:6px;
+            position:relative; overflow:visible; }
+.dp-fill  { height:100%; background:#2c7bb6; border-radius:6px;
+            position:absolute; top:0; left:0; }
+.dp-dline { position:absolute; width:2px; height:19px; top:-4px;
+            background:#e74c3c; border-radius:1px; }
+.dp-ds    { width:48px; padding:0.2rem 0.4rem; text-align:right; font-weight:600; }
+.dp-dd    { width:56px; padding:0.2rem 0.4rem; text-align:right; font-size:0.78rem; }
+
+.dp-lgd   { font-size:0.72rem; color:#888; margin-top:0.3rem; }
+.dp-lgd-bar  { display:inline-block; width:22px; height:9px; background:#2c7bb6;
+               border-radius:3px; vertical-align:middle; }
+.dp-lgd-line { display:inline-block; width:2px; height:13px; background:#e74c3c;
+               vertical-align:middle; }
+
+.dp-fb    { display:flex; gap:1rem; flex-wrap:wrap; }
+.dp-fbc   { flex:1; min-width:200px; }
+.dp-q     { font-size:0.82rem; color:#333; padding:0.3rem 0.5rem; margin-bottom:0.3rem;
+            border-left:3px solid #ccc; background:white; border-radius:0 4px 4px 0;
+            line-height:1.45; }
+.dp-plus  .dp-q  { border-left-color:#2a9d49; }
+.dp-delta .dp-q  { border-left-color:#e67e22; }
+.dp-none  { font-size:0.8rem; color:#aaa; font-style:italic; }
+
+/* Synthesis section */
+.dp-synthesis .dp-synth-body { font-size:0.84rem; line-height:1.5; }
+
+tbody tr { cursor:pointer; }
+tbody tr.dp-open > td:first-child { color:#1a6496; font-weight:bold; }
+
+/* ── Filter panel ─────────────────────────────────────────── */
+.pd-filter-panel {
+  display:flex; gap:1.5rem; align-items:flex-start;
+  padding:1rem 1.25rem; background:#f0f4f8; border-radius:6px;
+  margin-bottom:1.25rem; flex-wrap:wrap;
+}
+.pd-filter-group label {
+  display:block; font-size:0.78rem; font-weight:600; color:#555;
+  margin-bottom:0.3rem; text-transform:uppercase; letter-spacing:0.04em;
+}
+.pd-filter-select {
+  min-width:180px; padding:0.3rem 0.5rem; font-size:0.84rem;
+  border:1px solid #ccc; border-radius:4px; background:white;
+}
+.pd-filter-hint {
+  font-size:0.73rem; color:#888; font-style:italic; margin-top:0.3rem;
+}
+.pd-filter-actions { display:flex; flex-direction:column; gap:0.4rem; align-self:flex-end; }
+</style>
+```
+
+```{r header-html}
+knitr::asis_output(sprintf(
+  '<div style="background:#1a6496;color:white;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;">
+    <h2 style="margin:0;font-size:1.6rem;">Leadership Dashboard</h2>
+    <p style="margin:0.35rem 0 0;opacity:0.85;font-size:0.95rem;">
+      Department of Internal Medicine &nbsp;|&nbsp; %s &nbsp;|&nbsp;
+      %d Faculty &nbsp;+&nbsp; %d Fellows &nbsp;|&nbsp; Generated %s
+    </p>
+  </div>',
+  current_year, n_faculty, n_fellows, format(Sys.Date(), "%B %d, %Y")
+))
+```
+
+---
+
+## Overview
+
+```{r summary-boxes}
+overall_label <- if (is.na(dept_overall)) "—" else sprintf("%.2f / 5", dept_overall)
+n_divs_present <- length(unique(pd_people$fac_div[!is.na(pd_people$fac_div)]))
+
+boxes <- list(
+  list(val = as.character(n_faculty),    lbl = "Faculty",              sub = "active this year",              col = "#2c7bb6"),
+  list(val = as.character(n_fellows),    lbl = "Fellows",              sub = "active this year",              col = "#5b6abf"),
+  list(val = as.character(n_total_evals),lbl = "Evaluations Received", sub = current_year,                    col = "#2c7bb6"),
+  list(val = overall_label,             lbl = "Dept Avg Overall",      sub = "faculty + fellows, out of 5",   col = "#2c7bb6")
+)
+
+box_html <- paste(sapply(boxes, function(b) sprintf(
+  '<div style="background:#f8f9fa;border-left:4px solid %s;border-radius:4px;padding:1rem 1.25rem;">
+    <div style="font-size:1.85rem;font-weight:700;color:%s;">%s</div>
+    <div style="font-size:0.88rem;font-weight:600;color:#333;margin-top:0.15rem;">%s</div>
+    <div style="font-size:0.76rem;color:#888;margin-top:0.1rem;">%s</div>
+  </div>', b$col, b$col, b$val, b$lbl, b$sub
+)), collapse = "\n")
+
+knitr::asis_output(sprintf(
+  '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem;">%s</div>',
+  box_html
+))
+```
+
+---
+
+## Teaching Activity
+
+```{r assess-summary-callout}
+avg_per_person <- if (n_people > 0) round(n_total_assess / n_people, 1) else 0
+n_active_assessors <- length(unique(
+  all_person_assess_curr$ass_faculty[all_person_assess_curr$ass_faculty %in% all_person_names]
+))
+
+knitr::asis_output(sprintf(
+  '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1.25rem;">
+    <div style="background:#e8f4fd;border-radius:8px;padding:1rem 1.25rem;text-align:center;">
+      <div style="font-size:2.1rem;font-weight:800;color:#1a6496;">%d</div>
+      <div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">Total Assessments</div>
+      <div style="font-size:0.75rem;color:#666;margin-top:0.15rem;">%s</div>
+    </div>
+    <div style="background:#f5f5f5;border-radius:8px;padding:1rem 1.25rem;text-align:center;">
+      <div style="font-size:2.1rem;font-weight:800;color:#555;">%.1f</div>
+      <div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">Avg per Person</div>
+      <div style="font-size:0.75rem;color:#666;margin-top:0.15rem;">%s</div>
+    </div>
+    <div style="background:#fff8e1;border-radius:8px;padding:1rem 1.25rem;text-align:center;">
+      <div style="font-size:2.1rem;font-weight:800;color:#b7760a;">%d</div>
+      <div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">People Assessed</div>
+      <div style="font-size:0.75rem;color:#666;margin-top:0.15rem;">at least once this year</div>
+    </div>
+  </div>',
+  n_total_assess, current_year,
+  avg_per_person, current_year,
+  n_active_assessors
+))
+```
+
+```{r assess-by-level-chart}
+#| fig-height: 3
+#| fig-width: 6
+#| out-width: "100%"
+
+if (nrow(assess_by_level) > 0) {
+  lvl_order <- c("Intern", "PGY-2", "PGY-3", "Rotator", "Graduated")
+  assess_by_level |>
+    mutate(level_label = factor(level_label, levels = rev(lvl_order))) |>
+    ggplot(aes(x = n, y = level_label)) +
+    geom_col(fill = "#2c7bb6", width = 0.6) +
+    geom_text(aes(label = n), hjust = -0.3, size = 3.5, color = "#333") +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.15))) +
+    labs(title = sprintf("Assessments by Resident Level — %s", current_year),
+         x = "Number of Assessments", y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.y = element_blank(), panel.grid.minor = element_blank(),
+          plot.title = element_text(size = 12, face = "bold"))
+} else {
+  cat("*No assessment records found in the current academic year.*")
+}
+```
+
+---
+
+## Faculty & Fellows
+
+*Use the filters to narrow the list. Hold **Ctrl** (Windows) or **⌘** (Mac) to select multiple. Click any row to expand individual details.*
+
+```{=html}
+<div class="pd-filter-panel">
+  <div class="pd-filter-group">
+    <label>Type</label>
+    <select id="pd-type-filter" multiple size="2" class="pd-filter-select" style="min-width:130px;"></select>
+  </div>
+  <div class="pd-filter-group">
+    <label>Division</label>
+    <select id="pd-div-filter" multiple size="5" class="pd-filter-select"></select>
+  </div>
+  <div class="pd-filter-group">
+    <label>Med Ed Role</label>
+    <select id="pd-meded-filter" multiple size="5" class="pd-filter-select"></select>
+  </div>
+  <div class="pd-filter-group" style="align-self:center;">
+    <label style="display:flex;align-items:center;gap:0.4rem;cursor:pointer;font-size:0.85rem;font-weight:600;color:#555;">
+      <input type="checkbox" id="pd-synth-filter" style="width:15px;height:15px;cursor:pointer;">
+      Has Feedback Synthesis
+    </label>
+    <div class="pd-filter-hint" style="margin-top:0.4rem;">Only show people with AI feedback summary</div>
+  </div>
+  <div class="pd-filter-actions">
+    <button id="pd-filter-clear"
+            class="btn btn-sm btn-outline-secondary"
+            style="white-space:nowrap;">&#10005; Clear Filters</button>
+    <span class="pd-filter-hint">Hold Ctrl/&#8984; for multiple</span>
+  </div>
+</div>
+```
+
+```{r fellow-table}
+datatable(
+  fellow_summary,
+  rownames  = FALSE,
+  escape    = FALSE,
+  selection = "none",
+  options   = list(
+    columnDefs = list(
+      list(orderable = FALSE, className = "dt-center", width = "30px", targets = 0)
+    ),
+    pageLength = 50,
+    dom        = "tip",
+    order      = list(list(2, "asc"), list(3, "asc"), list(5, "desc"))  # Type, Division, Evals
+  ),
+  callback = DT::JS(callback_js)
+)
+```
+
+---
+
+```{r footer}
+knitr::asis_output(sprintf(
+  '<hr style="margin-top:2rem;">
+   <p style="font-size:0.78rem;color:#888;text-align:center;">
+     IMSLU Internal Medicine — Leadership Dashboard &nbsp;|&nbsp; %s &nbsp;|&nbsp;
+     Questions? Contact the GME Office.
+   </p>',
+  format(Sys.Date(), "%B %d, %Y")
+))
+```

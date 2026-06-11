@@ -1,0 +1,859 @@
+---
+title: "Faculty Teaching Report"
+subtitle: "Academic Year 2025–2026"
+params:
+  record_id: 1
+  faculty_rds: ""    # path to pre-fetched faculty RDS (passed by send_faculty_reports.R)
+  rdm_rds: ""        # path to pre-fetched RDM RDS
+format:
+  html:
+    self-contained: true
+    theme: flatly
+    toc: true
+    toc-location: left
+    toc-title: "Contents"
+    toc-depth: 2
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+
+library(tidyverse)
+library(knitr)
+
+# here::here() anchors to the .Rproj file so source() works whether rendered
+# interactively from RStudio or programmatically via quarto_render()
+source(here::here("R/utils/data_processing.R"))
+source(here::here("R/utils/calculations.R"))
+source(here::here("R/utils/plot_functions.R"))
+
+# ── Load data ──────────────────────────────────────────────────────────────────
+# Prefer pre-fetched RDS files passed from send_faculty_reports.R (no API call
+# in the subprocess). Fall back to live pull or test data if run interactively.
+if (nchar(params$faculty_rds) > 0 && file.exists(params$faculty_rds)) {
+  faculty_data <- readRDS(params$faculty_rds)
+  rdm_data     <- readRDS(params$rdm_rds)
+} else if (Sys.getenv("PRODUCTION_MODE") == "TRUE") {
+  faculty_data <- download_faculty_data()
+  rdm_data     <- download_rdm_focused()
+} else {
+  td           <- load_test_data()
+  faculty_data <- td$faculty
+  rdm_data     <- td$rdm
+}
+
+# ── Identify this faculty member ───────────────────────────────────────────────
+fac_row <- faculty_data |> filter(record_id == params$record_id)
+if (nrow(fac_row) == 0) stop("record_id ", params$record_id, " not found.")
+
+fac_name     <- clean_faculty_names(fac_row$fac_name)
+fac_email    <- fac_row$fac_email
+
+div_labels <- c(
+  "1" = "Addiction Medicine", "2" = "Allergy", "3" = "Cardiology",
+  "4" = "Endocrinology",    "5" = "Gastroenterology", "6" = "Geriatrics",
+  "7" = "GIM – Hospitalist", "8" = "GIM – Primary Care",
+  "9" = "Hematology / Oncology", "10" = "Infectious Disease",
+  "11" = "Nephrology", "12" = "Palliative Care",
+  "13" = "Pulmonary / Critical Care", "14" = "Rheumatology", "15" = "Other"
+)
+clin_labels <- c("1" = "SSM", "2" = "VA", "3" = "Other")
+
+fac_division  <- div_labels[as.character(fac_row$fac_div)]
+fac_clin      <- clin_labels[as.character(fac_row$fac_clin)]
+if (is.na(fac_division)) fac_division <- "Unknown Division"
+if (is.na(fac_clin))     fac_clin     <- ""
+
+current_year <- get_current_academic_year()
+
+prior_parts  <- strsplit(current_year, "-")[[1]]
+prior_year   <- paste0(as.integer(prior_parts[1]) - 1, "-", as.integer(prior_parts[2]) - 1)
+
+# ── Clean and filter eval data ─────────────────────────────────────────────────
+fac_eval <- rdm_data$faculty_evaluation |>
+  mutate(fac_fell_name = clean_faculty_names(fac_fell_name),
+         approachability = suppressWarnings(as.numeric(approachability)),
+         respect         = suppressWarnings(as.numeric(respect)),
+         bedside_manner  = suppressWarnings(as.numeric(bedside_manner)),
+         time_teaching   = suppressWarnings(as.numeric(time_teaching)),
+         ques_clin_des   = suppressWarnings(as.numeric(ques_clin_des)),
+         autonomy        = suppressWarnings(as.numeric(autonomy)),
+         feedback        = suppressWarnings(as.numeric(feedback)),
+         organ           = suppressWarnings(as.numeric(organ)),
+         att_overall     = suppressWarnings(as.numeric(att_overall)))
+
+assessment <- rdm_data$assessment |>
+  mutate(ass_faculty = clean_faculty_names(ass_faculty))
+
+# Current-year evals for this faculty
+my_evals_curr <- fac_eval |>
+  filter(fac_fell_name == fac_name) |>
+  filter_by_academic_year(date_col = "fac_eval_date", year = current_year)
+
+n_evals       <- nrow(my_evals_curr)
+meets_threshold <- n_evals >= MIN_EVALUATIONS
+
+# Dept-wide evals this year (all faculty) for comparison
+dept_evals_curr <- fac_eval |>
+  filter_by_academic_year(date_col = "fac_eval_date", year = current_year)
+
+# ── Assessment counts ──────────────────────────────────────────────────────────
+assess_stats <- get_faculty_assessment_stats(
+  assessment_data  = assessment,
+  faculty_name     = fac_name,
+  academic_year    = "current"
+)
+
+prior_count <- count_faculty_assessments(assessment, fac_name, prior_year)
+
+my_assess_curr <- assessment |>
+  filter(ass_faculty == fac_name) |>
+  filter_by_academic_year(date_col = "ass_date", year = "current")
+
+level_map <- c("1" = "Intern", "2" = "PGY-2", "3" = "PGY-3",
+                "4" = "Graduated", "5" = "Rotator")
+
+assess_by_level <- my_assess_curr |>
+  filter(!is.na(ass_level)) |>
+  mutate(level_label = level_map[as.character(ass_level)]) |>
+  count(level_label) |>
+  arrange(match(level_label, c("Intern", "PGY-2", "PGY-3", "Rotator", "Graduated")))
+
+# ── Domain means ──────────────────────────────────────────────────────────────
+my_means   <- calculate_faculty_eval_means(my_evals_curr, domains = PRIMARY_EVAL_DOMAINS)
+dept_means <- calculate_faculty_eval_means(dept_evals_curr, domains = PRIMARY_EVAL_DOMAINS)
+comparison <- create_comparison_table(my_means, dept_means) |> add_domain_labels()
+
+my_overall   <- if (n_evals > 0) round(mean(my_evals_curr$att_overall, na.rm = TRUE), 2) else NA
+dept_overall <- round(mean(dept_evals_curr$att_overall, na.rm = TRUE), 2)
+
+# ── Division / section averages ────────────────────────────────────────────────
+div_faculty_names <- faculty_data |>
+  filter(fac_div == fac_row$fac_div,
+         archived == 0 | is.na(archived),
+         fac_fell == 1 | is.na(fac_fell)) |>
+  pull(fac_name) |>
+  clean_faculty_names()
+
+div_evals_curr <- fac_eval |>
+  filter(fac_fell_name %in% div_faculty_names) |>
+  filter_by_academic_year(date_col = "fac_eval_date", year = current_year)
+
+div_means <- calculate_faculty_eval_means(div_evals_curr, domains = PRIMARY_EVAL_DOMAINS)
+
+# Join division score into comparison table
+comparison <- comparison |>
+  left_join(
+    div_means |> select(domain, div_score = mean_score),
+    by = "domain"
+  )
+
+# ── Prior dated years (non-current, has date) ─────────────────────────────────
+# These are evaluations with dates that fall outside the current academic year.
+# Empty now (all dated evals are 2025-2026), will populate in future reports.
+my_evals_prior <- fac_eval |>
+  filter(fac_fell_name == fac_name,
+         !is.na(fac_eval_date),
+         assign_academic_year(fac_eval_date) != current_year)
+
+n_evals_prior         <- nrow(my_evals_prior)
+meets_threshold_prior <- n_evals_prior >= MIN_EVALUATIONS
+my_means_prior        <- calculate_faculty_eval_means(my_evals_prior, domains = PRIMARY_EVAL_DOMAINS)
+my_overall_prior      <- if (n_evals_prior > 0) round(mean(my_evals_prior$att_overall, na.rm = TRUE), 2) else NA
+
+# ── Historical / undated evals (NA date = pre-migration legacy data) ───────────
+my_evals_hist  <- fac_eval |> filter(fac_fell_name == fac_name, is.na(fac_eval_date))
+n_evals_hist   <- nrow(my_evals_hist)
+my_means_hist  <- calculate_faculty_eval_means(my_evals_hist, domains = PRIMARY_EVAL_DOMAINS)
+my_overall_hist <- if (n_evals_hist > 0) round(mean(my_evals_hist$att_overall, na.rm = TRUE), 2) else NA
+
+# ── All-time (everything) ──────────────────────────────────────────────────────
+my_evals_all   <- fac_eval |> filter(fac_fell_name == fac_name)
+n_evals_all    <- nrow(my_evals_all)
+my_means_all   <- calculate_faculty_eval_means(my_evals_all, domains = PRIMARY_EVAL_DOMAINS)
+my_overall_all <- if (n_evals_all > 0) round(mean(my_evals_all$att_overall, na.rm = TRUE), 2) else NA
+
+# ── Assessment type breakdown ─────────────────────────────────────────────────
+# Detect type from which sub-fields are populated.
+# Order matters: more-specific checks applied after general ones so they override.
+label_assess_type <- function(df) {
+  df$assess_type <- "General (plus/delta)"
+  # Inpatient
+  if ("ass_int_ip_pc4_r1"    %in% names(df)) df$assess_type[!is.na(df$ass_int_ip_pc4_r1)]    <- "Inpatient (Intern)"
+  if ("ass_res_ip_ics2_r1"   %in% names(df)) df$assess_type[!is.na(df$ass_res_ip_ics2_r1)]   <- "Inpatient (Resident)"
+  # Consult
+  if ("ass_cons_prof"        %in% names(df)) df$assess_type[!is.na(df$ass_cons_prof)]         <- "Consult"
+  # Bridge / Transitions of care
+  if ("ass_bridge_pc5_r3"    %in% names(df)) df$assess_type[!is.na(df$ass_bridge_pc5_r3)]     <- "Bridge / Transitions"
+  # Day assessment (clinical reasoning, no structured CC/IP form)
+  if ("ass_day_pc1_r1"       %in% names(df)) df$assess_type[!is.na(df$ass_day_pc1_r1)]        <- "Day Assessment"
+  # Continuity clinic — quarterly (inbasket / documentation sub-forms share this key)
+  if ("ass_cc_quart"         %in% names(df)) df$assess_type[!is.na(df$ass_cc_quart)]          <- "CC Quarterly"
+  # Continuity clinic — semi-annual by level
+  if ("ass_cc_int_semi_pc1"  %in% names(df)) df$assess_type[!is.na(df$ass_cc_int_semi_pc1)]   <- "CC Semi-Annual (Intern)"
+  if ("ass_cc_pgy2_semi_pc1" %in% names(df)) df$assess_type[!is.na(df$ass_cc_pgy2_semi_pc1)]  <- "CC Semi-Annual (PGY-2)"
+  if ("ass_cc_pgy3_semi_pc1" %in% names(df)) df$assess_type[!is.na(df$ass_cc_pgy3_semi_pc1)]  <- "CC Semi-Annual (PGY-3)"
+  # Direct observation (overrides day assessment if obs_type also set)
+  if ("ass_obs_type"         %in% names(df)) df$assess_type[!is.na(df$ass_obs_type)]          <- "Direct Observation"
+  df
+}
+
+assess_by_type <- my_assess_curr |>
+  label_assess_type() |>
+  count(assess_type) |>
+  arrange(desc(n))
+
+# ── Free-text feedback (current year, randomised order) ───────────────────────
+feedback_raw <- get_faculty_feedback(
+  eval_data    = fac_eval |> filter_by_academic_year("fac_eval_date", current_year),
+  faculty_name = fac_name
+)
+# Randomise order so chronological correlation is harder
+set.seed(42)
+feedback <- list(
+  plus  = feedback_raw$plus[sample(nrow(feedback_raw$plus)),],
+  delta = feedback_raw$delta[sample(nrow(feedback_raw$delta)),]
+)
+MIN_COMMENTS <- 3   # minimum free-text entries to display
+
+# ── Historical free-text feedback (undated legacy) ─────────────────────────────
+feedback_hist_raw <- get_faculty_feedback(
+  eval_data    = my_evals_hist,
+  faculty_name = fac_name
+)
+set.seed(123)
+feedback_hist <- list(
+  plus  = feedback_hist_raw$plus[sample(nrow(feedback_hist_raw$plus)),],
+  delta = feedback_hist_raw$delta[sample(nrow(feedback_hist_raw$delta)),]
+)
+```
+
+```{r header-html}
+knitr::asis_output(sprintf(
+  '<div style="background:#1a6496;color:white;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;">
+    <h2 style="margin:0;font-size:1.6rem;">%s</h2>
+    <p style="margin:0.35rem 0 0;opacity:0.85;font-size:0.95rem;">%s &nbsp;|&nbsp; %s &nbsp;|&nbsp; Report generated %s</p>
+  </div>',
+  fac_name,
+  fac_division,
+  if (nchar(fac_clin) > 0) fac_clin else "Department",
+  format(Sys.Date(), "%B %d, %Y")
+))
+```
+
+---
+
+## Summary
+
+```{r summary-boxes}
+n_assess <- assess_stats$individual_count
+dept_assess_avg <- round(assess_stats$peer_mean, 1)
+assess_vs_avg <- if (!is.na(dept_assess_avg) && !is.na(n_assess)) {
+  if (n_assess > dept_assess_avg) "↑ above avg" else if (n_assess < dept_assess_avg) "↓ below avg" else "= dept avg"
+} else ""
+
+overall_label <- if (is.na(my_overall)) "—" else sprintf("%.1f / 5", my_overall)
+
+boxes <- list(
+  list(val = as.character(n_evals),  lbl = "Evaluations Received", sub = current_year, col = "#2c7bb6"),
+  list(val = overall_label,          lbl = "Overall Rating",        sub = "out of 5.0", col = "#2c7bb6"),
+  list(val = as.character(n_assess), lbl = "Assessments Given",     sub = current_year, col = "#2c7bb6")
+)
+
+box_html <- paste(sapply(boxes, function(b) {
+  sprintf(
+    '<div style="background:#f8f9fa;border-left:4px solid %s;border-radius:4px;padding:1rem 1.25rem;">
+      <div style="font-size:1.9rem;font-weight:700;color:%s;">%s</div>
+      <div style="font-size:0.9rem;font-weight:600;color:#333;margin-top:0.15rem;">%s</div>
+      <div style="font-size:0.78rem;color:#888;margin-top:0.1rem;">%s</div>
+    </div>', b$col, b$col, b$val, b$lbl, b$sub)
+}), collapse = "\n")
+knitr::asis_output(sprintf(
+  '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem;">%s</div>',
+  box_html
+))
+```
+
+---
+
+## Teaching Activity
+
+```{r teaching-activity-callout}
+n_curr  <- assess_stats$individual_count
+n_prior <- prior_count
+n_dept  <- round(assess_stats$peer_mean, 1)
+
+diff_val <- n_curr - n_prior
+trend_arrow <- if (!is.na(n_prior) && n_prior > 0) {
+  if (diff_val > 0) paste0("&#8593;&nbsp;+", diff_val, " vs last year")
+  else if (diff_val < 0) paste0("&#8595;&nbsp;", diff_val, " vs last year")
+  else "&#8212; same as last year"
+} else ""
+
+stat_cards <- paste0(
+  '<div style="background:#e8f4fd;border-radius:8px;padding:1rem 1.25rem;text-align:center;">',
+    '<div style="font-size:2.2rem;font-weight:800;color:#1a6496;">', n_curr, '</div>',
+    '<div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">Assessments This Year</div>',
+    '<div style="font-size:0.75rem;color:#666;margin-top:0.2rem;">', trend_arrow, '</div>',
+  '</div>',
+  '<div style="background:#f5f5f5;border-radius:8px;padding:1rem 1.25rem;text-align:center;">',
+    '<div style="font-size:2.2rem;font-weight:800;color:#555;">', n_prior, '</div>',
+    '<div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">Last Year</div>',
+    '<div style="font-size:0.75rem;color:#666;margin-top:0.2rem;">', prior_year, '</div>',
+  '</div>',
+  '<div style="background:#fff8e1;border-radius:8px;padding:1rem 1.25rem;text-align:center;">',
+    '<div style="font-size:2.2rem;font-weight:800;color:#b7760a;">', n_dept, '</div>',
+    '<div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">Dept Average</div>',
+    '<div style="font-size:0.75rem;color:#666;margin-top:0.2rem;">per faculty this year</div>',
+  '</div>'
+)
+
+type_cards <- paste0(
+  '<div style="border:1px solid #b8d4e8;border-top:4px solid #2c7bb6;border-radius:6px;padding:0.85rem 1rem;">',
+    '<div style="font-size:0.8rem;font-weight:700;color:#2c7bb6;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem;">Summary</div>',
+    '<div style="font-size:0.88rem;color:#444;line-height:1.45;">Covers your full time with a resident &mdash; continuity clinic or an inpatient team rotation.</div>',
+  '</div>',
+  '<div style="border:1px solid #b8d4e8;border-top:4px solid #5b9bd5;border-radius:6px;padding:0.85rem 1rem;">',
+    '<div style="font-size:0.8rem;font-weight:700;color:#5b9bd5;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem;">One-Day</div>',
+    '<div style="font-size:0.88rem;color:#444;line-height:1.45;">A single day encounter &mdash; ideal for specialty clinics or a focused interaction.</div>',
+  '</div>',
+  '<div style="border:1px solid #b8d4e8;border-top:4px solid #74add1;border-radius:6px;padding:0.85rem 1rem;">',
+    '<div style="font-size:0.8rem;font-weight:700;color:#74add1;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.4rem;">Observation</div>',
+    '<div style="font-size:0.88rem;color:#444;line-height:1.45;">Watch a specific activity: presentation, note, patient talk, goals-of-care discussion, or procedure.</div>',
+  '</div>'
+)
+
+knitr::asis_output(paste0(
+  '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1.25rem;">', stat_cards, '</div>',
+  '<div style="background:#1a6496;color:white;border-radius:6px;padding:0.65rem 1.1rem;margin-bottom:1.25rem;display:flex;align-items:center;gap:0.75rem;">',
+    '<span style="font-size:1.3rem;">&#128197;</span>',
+    '<span style="font-size:0.95rem;"><strong>Program goal:</strong> each resident receives ~1 assessment per week. Volume varies naturally with how often you work with residents.</span>',
+  '</div>',
+  '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1.25rem;">', type_cards, '</div>'
+))
+```
+
+```{r assess-by-level}
+#| fig-height: 3
+#| fig-width: 6
+#| out-width: "100%"
+
+if (nrow(assess_by_level) > 0) {
+  lvl_order <- c("Intern", "PGY-2", "PGY-3", "Rotator", "Graduated")
+  assess_by_level |>
+    mutate(level_label = factor(level_label, levels = rev(lvl_order))) |>
+    ggplot(aes(x = n, y = level_label)) +
+    geom_col(fill = "#2c7bb6", width = 0.6) +
+    geom_text(aes(label = n), hjust = -0.3, size = 3.5, color = "#333") +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.15))) +
+    labs(title = paste("Resident Assessments by Level —", current_year),
+         x = "Number of Assessments", y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.minor   = element_blank(),
+          plot.title         = element_text(size = 12, face = "bold"))
+} else {
+  message("No assessment records found for this faculty in the current academic year.")
+}
+```
+
+```{r assess-by-type}
+#| fig-height: 3
+#| fig-width: 6
+#| out-width: "100%"
+
+if (nrow(assess_by_type) > 0) {
+  assess_by_type |>
+    mutate(assess_type = fct_reorder(assess_type, n)) |>
+    ggplot(aes(x = n, y = assess_type)) +
+    geom_col(fill = "#756bb1", width = 0.6) +
+    geom_text(aes(label = n), hjust = -0.3, size = 3.5, color = "#333") +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.15))) +
+    labs(title = "Assessments by Type", x = "Count", y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.minor   = element_blank(),
+          plot.title         = element_text(size = 12, face = "bold"))
+}
+```
+
+::: {.callout-note appearance="simple"}
+Assessments include all forms submitted with your name in the current academic year. Type is detected from which evaluation fields are populated in each record.
+:::
+
+---
+
+## Resident Ratings
+
+```{r ratings-threshold-check}
+knitr::asis_output(if (!meets_threshold) {
+  sprintf(
+    '<div style="background:#fff8e1;border-left:4px solid #f0ad4e;border-radius:4px;padding:0.85rem 1.1rem;margin-bottom:1rem;">
+      <strong>Insufficient Data</strong> — %d evaluation%s received in %s. A minimum of %d is required to display scores. Ratings will appear once enough evaluations are collected.
+    </div>',
+    n_evals, if (n_evals == 1) "" else "s", current_year, MIN_EVALUATIONS
+  )
+} else "")
+```
+
+```{r overall-callout}
+if (meets_threshold && !is.na(my_overall)) {
+  overall_scale <- c("1" = "Needs improvement", "2" = "Satisfactory",
+                     "3" = "Good", "4" = "Very good", "5" = "Outstanding")
+  nearest      <- names(which.min(abs(as.numeric(names(overall_scale)) - my_overall)))
+  overall_text <- overall_scale[nearest]
+
+  hist_line <- if (!is.na(my_overall_hist) && n_evals_hist > 0) {
+    sprintf("Historical (undated legacy): <strong>%.2f</strong> — N=%d", my_overall_hist, n_evals_hist)
+  } else ""
+
+  all_time_line <- if (!is.na(my_overall_all) && n_evals_all > n_evals) {
+    sprintf("All-time overall: <strong>%.2f</strong> across %d total evaluations", my_overall_all, n_evals_all)
+  } else ""
+
+  knitr::asis_output(sprintf(
+    '<div style="background:#f0f7ff;border:1px solid #cce0f5;border-radius:6px;
+               padding:1rem 1.5rem;margin-bottom:1.25rem;display:flex;
+               align-items:center;gap:1.5rem;">
+      <div style="text-align:center;min-width:90px;">
+        <div style="font-size:2.8rem;font-weight:800;color:#2c7bb6;">%.1f</div>
+        <div style="font-size:0.75rem;color:#555;">out of 5.0</div>
+      </div>
+      <div>
+        <div style="font-size:1.05rem;font-weight:600;">Overall Teaching Rating — %s</div>
+        <div style="color:#555;font-weight:500;margin-top:0.2rem;">%s</div>
+        <div style="font-size:0.82rem;color:#777;margin-top:0.3rem;">%s</div>
+        <div style="font-size:0.82rem;color:#777;margin-top:0.1rem;">%s</div>
+        <div style="font-size:0.82rem;color:#888;margin-top:0.15rem;">This year: %d evaluations</div>
+      </div>
+    </div>',
+    my_overall, current_year,
+    overall_text,
+    hist_line,
+    all_time_line,
+    n_evals
+  ))
+}
+```
+
+### Domain Scores
+
+Residents rated you across 8 teaching domains on a 1–5 scale. Your two lowest-rated domains are highlighted below the chart as starting points for reflection, along with evidence-based resources.
+
+```{r domain-chart}
+#| fig-height: 4.5
+#| fig-width: 7
+#| out-width: "100%"
+
+if (meets_threshold && nrow(comparison) > 0) {
+  df <- comparison |>
+    arrange(individual_score) |>
+    mutate(domain_label = factor(domain_label, levels = domain_label))
+
+  # Fixed x position for the right-aligned score column
+  score_x <- 5.75
+
+  ggplot(df, aes(y = domain_label)) +
+    # Subtle horizontal reference line per row
+    geom_segment(aes(x = 1, xend = 5.5, yend = domain_label),
+                 color = "#e8e8e8", linewidth = 0.4) +
+    # Dept average — black square
+    geom_point(aes(x = all_score,        shape = "dept", color = "dept"), size = 4) +
+    # Division average — orange diamond
+    geom_point(aes(x = div_score,        shape = "div",  color = "div"),  size = 4) +
+    # Individual faculty — blue circle (on top)
+    geom_point(aes(x = individual_score, shape = "me",   color = "me"),   size = 5) +
+    # Score labels in a straight right-aligned column
+    geom_text(aes(x = score_x, label = sprintf("%.2f", individual_score)),
+              hjust = 1, size = 3.4, color = "#333333") +
+    scale_shape_manual(
+      name   = NULL,
+      values = c(me = 19, div = 18, dept = 15),
+      labels = c(me = "You", div = paste0(fac_division, " Avg"), dept = "Dept Avg")
+    ) +
+    scale_color_manual(
+      name   = NULL,
+      values = c(me = "#2c7bb6", div = "#e65100", dept = "#555555"),
+      labels = c(me = "You", div = paste0(fac_division, " Avg"), dept = "Dept Avg")
+    ) +
+    scale_x_continuous(limits = c(1, score_x), breaks = 1:5,
+                       expand = expansion(mult = c(0, 0))) +
+    labs(x = "Score (1 = low, 5 = high)", y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.minor   = element_blank(),
+          legend.position    = "bottom",
+          legend.text        = element_text(size = 10))
+}
+```
+
+```{r strengths-growth}
+# ── Evidence resources keyed by domain field name ─────────────────────────────
+domain_resources <- list(
+  approachability = list(
+    list(
+      title = "Psychological Safety & Approachability in Residency (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC5180524/",
+      blurb = "VA Learners' Perceptions Survey showing how faculty approachability shapes resident learning behavior and patient safety culture."
+    ),
+    list(
+      title = "Psychological Safety and Support — Assessing Resident Perceptions (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC6314376/",
+      blurb = "Practical framework for assessing and improving psychological safety in the clinical learning environment."
+    )
+  ),
+  respect = list(
+    list(
+      title = "Psychological Safety in Medical Education (JGIM, 2024)",
+      url   = "https://link.springer.com/article/10.1007/s11606-024-09166-y",
+      blurb = "Reviews how respect and safety in the learning environment affect trainee performance and wellbeing."
+    ),
+    list(
+      title = "AMA: How Psychological Safety Helps Resident Physicians Flourish",
+      url   = "https://www.ama-assn.org/medical-residents/medical-resident-wellness/how-psychological-safety-can-help-resident-physicians",
+      blurb = "Practical guidance on building a respectful, high-performing clinical team environment."
+    )
+  ),
+  bedside_manner = list(
+    list(
+      title = "Strategies to Improve Bedside Clinical Skills Teaching (CHEST, 2021)",
+      url   = "https://journal.chestnet.org/article/S0012-3692(21)01287-3/abstract",
+      blurb = "Evidence-based strategies for intentional bedside teaching including goal-setting, patient inclusion, and hypothesis-driven physical exam."
+    ),
+    list(
+      title = "Evidence-Based Methods for Clinical Skills Teaching (SLU CEDAR)",
+      url   = "https://www.slu.edu/medicine/about/faculty-resources/cedar/posts/clinical-skills-teaching.php",
+      blurb = "Practical faculty development resource on bedside teaching models including Peyton's 4-step approach."
+    )
+  ),
+  time_teaching = list(
+    list(
+      title = "The One-Minute Preceptor: Review & Evidence (Clinical Teaching)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC7390547/",
+      blurb = "CORD best-practices guide. The One-Minute Preceptor structures brief encounters to maximize teaching without additional time."
+    ),
+    list(
+      title = "One-Minute Preceptor — Efficient and Effective (JAHSE)",
+      url   = "https://jahse.med.utah.edu/one-minute-preceptor-an-efficient-and-effective-teaching-tool/",
+      blurb = "Step-by-step implementation guide: get a commitment, probe for reasoning, teach a general rule, reinforce, correct."
+    )
+  ),
+  ques_clin_des = list(
+    list(
+      title = "SNAPPS vs One-Minute Preceptor for Clinical Reasoning (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC4712551/",
+      blurb = "Comparing two frameworks for drawing out residents' clinical reasoning through structured questioning."
+    ),
+    list(
+      title = "Clinical Teaching — CORD Evidence-Based Best Practices (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC7390547/",
+      blurb = "Covers Socratic questioning, hypothesis-driven case discussion, and probing for reasoning during rounds."
+    )
+  ),
+  autonomy = list(
+    list(
+      title = "SNAPPS: Learner-Led Case Presentations Promoting Autonomy (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC4712551/",
+      blurb = "SNAPPS gives residents ownership of clinical reasoning — faculty role shifts to guide rather than direct."
+    ),
+    list(
+      title = "One-Minute Preceptor — Supporting Resident Decision-Making",
+      url   = "https://clime.washington.edu/wp-content/uploads/2023/07/1-s2.0-S0736467916301378-main.pdf",
+      blurb = "Evidence review showing OMP's 'get a commitment' and 'probe for reasoning' steps build resident autonomy."
+    )
+  ),
+  feedback = list(
+    list(
+      title = "Feedback in Medical Education — CORD Evidence-Based Guide (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC10284500/",
+      blurb = "Comprehensive best-practices guide: learner-centered feedback, co-created goals, collaborative discussion, and removing barriers."
+    ),
+    list(
+      title = "Longitudinal Faculty Development for Observation & Feedback (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC6338150/",
+      blurb = "Behavioral anchoring, peer-led observation, and video-based training for developing effective feedback skills."
+    )
+  ),
+  organ = list(
+    list(
+      title = "One-Minute Preceptor — Structuring Teaching Encounters",
+      url   = "https://jahse.med.utah.edu/one-minute-preceptor-an-efficient-and-effective-teaching-tool/",
+      blurb = "Provides a repeatable 5-step structure for organizing any brief teaching encounter, from rounds to clinic."
+    ),
+    list(
+      title = "Clinical Teaching — CORD Best Practices (PMC)",
+      url   = "https://pmc.ncbi.nlm.nih.gov/articles/PMC7390547/",
+      blurb = "Frameworks for organizing inpatient and outpatient teaching sessions with clear goals and structured discussion."
+    )
+  )
+)
+
+# ── Strengths and growth panels ───────────────────────────────────────────────
+if (meets_threshold && nrow(comparison) > 0) {
+  ranked <- comparison |> arrange(desc(individual_score))
+  top    <- head(ranked, 3)
+  bottom <- tail(ranked, 2)
+
+  # Strengths panel
+  strength_items <- paste(sapply(seq_len(nrow(top)), function(i) {
+    sprintf('<li style="margin-bottom:0.3rem;"><strong>%s</strong> — %.2f / 5</li>',
+            top$domain_label[i], top$individual_score[i])
+  }), collapse = "")
+
+  # Growth panel with evidence links
+  growth_items <- paste(sapply(seq_len(nrow(bottom)), function(i) {
+    dom   <- bottom$domain[i]
+    lbl   <- bottom$domain_label[i]
+    score <- bottom$individual_score[i]
+    res   <- domain_resources[[dom]]
+
+    links <- if (!is.null(res)) {
+      link_html <- paste(sapply(res, function(r) {
+        sprintf('<li style="margin-bottom:0.4rem;"><a href="%s" target="_blank">%s</a> — %s</li>',
+                r$url, r$title, r$blurb)
+      }), collapse = "")
+      sprintf('<ul style="margin-top:0.4rem;font-size:0.85rem;color:#444;padding-left:1.2rem;">%s</ul>', link_html)
+    } else ""
+
+    sprintf(
+      '<div style="margin-bottom:1rem;">
+         <strong>%s</strong> — %.2f / 5
+         %s
+       </div>',
+      lbl, score, links
+    )
+  }), collapse = "")
+
+  knitr::asis_output(sprintf(
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1.25rem;">
+
+      <div style="background:#f0f7f0;border-left:4px solid #2e7d32;border-radius:5px;padding:1rem 1.25rem;">
+        <div style="font-size:1rem;font-weight:700;color:#2e7d32;margin-bottom:0.6rem;">&#10003; Resident-Identified Strengths</div>
+        <ul style="margin:0;padding-left:1.2rem;font-size:0.95rem;color:#333;">%s</ul>
+      </div>
+
+      <div style="background:#fff8f0;border-left:4px solid #e65100;border-radius:5px;padding:1rem 1.25rem;">
+        <div style="font-size:1rem;font-weight:700;color:#e65100;margin-bottom:0.6rem;">&#8599; Areas to Explore</div>
+        <div style="font-size:0.95rem;color:#333;">%s</div>
+      </div>
+
+    </div>',
+    strength_items, growth_items
+  ))
+}
+```
+
+```{r domain-table}
+if (meets_threshold && nrow(comparison) > 0) {
+
+  # Historical undated column
+  hist_col <- if (n_evals_hist > 0 && nrow(my_means_hist) > 0) {
+    my_means_hist |> mutate(hist_score = round(mean_score, 2)) |> select(domain, hist_score)
+  } else {
+    tibble(domain = PRIMARY_EVAL_DOMAINS, hist_score = NA_real_)
+  }
+
+  # Prior dated years column (empty now; populates when future years accumulate)
+  prior_col <- if (n_evals_prior > 0 && nrow(my_means_prior) > 0) {
+    my_means_prior |> mutate(prior_score = round(mean_score, 2)) |> select(domain, prior_score)
+  } else {
+    tibble(domain = PRIMARY_EVAL_DOMAINS, prior_score = NA_real_)
+  }
+
+  # All-time column
+  all_col <- if (n_evals_all > 0 && nrow(my_means_all) > 0) {
+    my_means_all |> mutate(all_time_score = round(mean_score, 2)) |> select(domain, all_time_score)
+  } else {
+    tibble(domain = PRIMARY_EVAL_DOMAINS, all_time_score = NA_real_)
+  }
+
+  tbl <- comparison |>
+    left_join(hist_col,  by = "domain") |>
+    left_join(prior_col, by = "domain") |>
+    left_join(all_col,   by = "domain") |>
+    arrange(desc(individual_score)) |>
+    mutate(
+      Domain           = domain_label,
+      `This Year`      = round(individual_score, 2),
+      `Div/Sect Avg`   = round(div_score, 2),
+      `Dept Avg`       = round(all_score, 2),
+      `Diff vs Dept`   = round(difference, 2)
+    ) |>
+    select(Domain, `This Year`, hist_score, prior_score, all_time_score,
+           `Div/Sect Avg`, `Dept Avg`, `Diff vs Dept`)
+
+  names(tbl)[3] <- sprintf("Historical\n(N=%d)", n_evals_hist)
+  names(tbl)[4] <- if (n_evals_prior > 0) sprintf("Prior Years\n(N=%d)", n_evals_prior) else "Prior Years"
+  names(tbl)[5] <- sprintf("All Time\n(N=%d)", n_evals_all)
+
+  diff_colors <- if_else(comparison$difference >= 0, "#1a9641", "#d7191c", missing = "#555")
+
+  kable(tbl, align = c("l", "c", "c", "c", "c", "c", "c", "c"),
+        caption = paste0("Domain scores — ", current_year,
+                         ". Historical = undated legacy evaluations (pre-migration). ",
+                         "Prior Years = dated evaluations from earlier academic years.")) |>
+    kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                              full_width = TRUE, font_size = 13) |>
+    kableExtra::column_spec(8, color = diff_colors)
+}
+```
+
+::: {.callout-note appearance="simple"}
+**Scale:** 1 = Lowest, 5 = Highest. The ◆ orange marker shows your division/section average; the ◆ black marker shows the department average. "Areas to Explore" are your two lowest-rated domains — a starting point for reflection, not a ranking.
+:::
+
+---
+
+## Resident Feedback
+
+These are the verbatim comments residents submitted about your teaching. No identifying information (resident name or dates) is shown.
+
+### What Residents Say You Do Well
+
+```{r plus-feedback}
+plus <- feedback$plus
+knitr::asis_output(if (nrow(plus) >= MIN_COMMENTS) {
+  paste(sapply(seq_len(nrow(plus)), function(i) {
+    sprintf('<div style="background:#f6fff6;border-left:4px solid #1a9641;border-radius:3px;padding:0.6rem 1rem;margin-bottom:0.6rem;font-size:0.95rem;">%s</div>',
+            htmltools::htmlEscape(plus$plus[i]))
+  }), collapse = "\n")
+} else if (nrow(plus) > 0) {
+  sprintf('<p><em>%d comment%s received — a minimum of %d is required to display individual responses.</em></p>',
+          nrow(plus), if (nrow(plus) == 1) "" else "s", MIN_COMMENTS)
+} else {
+  "<p><em>No plus comments received in this period.</em></p>"
+})
+```
+
+```{r plus-hist-toggle}
+if (nrow(feedback_hist$plus) >= MIN_COMMENTS) {
+  cards <- paste(sapply(seq_len(nrow(feedback_hist$plus)), function(i) {
+    sprintf('<div style="background:#f6fff6;border-left:4px solid #1a9641;border-radius:3px;padding:0.6rem 1rem;margin-bottom:0.6rem;font-size:0.95rem;">%s</div>',
+            htmltools::htmlEscape(feedback_hist$plus$plus[i]))
+  }), collapse = "\n")
+  knitr::asis_output(sprintf(
+    '<details style="margin-top:1rem;border:1px solid #b2dfdb;border-radius:6px;overflow:hidden;">
+       <summary style="cursor:pointer;font-size:1rem;font-weight:600;color:#1b5e20;
+                       background:#e8f5e9;padding:0.75rem 1.1rem;
+                       list-style:none;display:flex;align-items:center;gap:0.5rem;">
+         &#9660; Historical plus comments (N=%d, pre-2025 legacy) &mdash; click to expand
+       </summary>
+       <div style="padding:0.75rem 1rem;">%s</div>
+     </details>', nrow(feedback_hist$plus), cards))
+}
+```
+
+### Areas for Growth
+
+```{r delta-feedback}
+delta <- feedback$delta
+knitr::asis_output(if (nrow(delta) >= MIN_COMMENTS) {
+  paste(sapply(seq_len(nrow(delta)), function(i) {
+    sprintf('<div style="background:#fff8f6;border-left:4px solid #d7191c;border-radius:3px;padding:0.6rem 1rem;margin-bottom:0.6rem;font-size:0.95rem;">%s</div>',
+            htmltools::htmlEscape(delta$delta[i]))
+  }), collapse = "\n")
+} else if (nrow(delta) > 0) {
+  sprintf('<p><em>%d comment%s received — a minimum of %d is required to display individual responses.</em></p>',
+          nrow(delta), if (nrow(delta) == 1) "" else "s", MIN_COMMENTS)
+} else {
+  "<p><em>No delta comments received in this period.</em></p>"
+})
+```
+
+```{r delta-hist-toggle}
+if (nrow(feedback_hist$delta) >= MIN_COMMENTS) {
+  cards <- paste(sapply(seq_len(nrow(feedback_hist$delta)), function(i) {
+    sprintf('<div style="background:#fff8f6;border-left:4px solid #d7191c;border-radius:3px;padding:0.6rem 1rem;margin-bottom:0.6rem;font-size:0.95rem;">%s</div>',
+            htmltools::htmlEscape(feedback_hist$delta$delta[i]))
+  }), collapse = "\n")
+  knitr::asis_output(sprintf(
+    '<details style="margin-top:1rem;border:1px solid #ffccbc;border-radius:6px;overflow:hidden;">
+       <summary style="cursor:pointer;font-size:1rem;font-weight:600;color:#b71c1c;
+                       background:#fbe9e7;padding:0.75rem 1.1rem;
+                       list-style:none;display:flex;align-items:center;gap:0.5rem;">
+         &#9660; Historical areas for growth (N=%d, pre-2025 legacy) &mdash; click to expand
+       </summary>
+       <div style="padding:0.75rem 1rem;">%s</div>
+     </details>', nrow(feedback_hist$delta), cards))
+}
+```
+
+---
+
+## Feedback on Your Feedback
+
+```{r feedback-synthesis}
+#| results: asis
+
+# Show synthesis if available and the faculty meets the minimum-evaluation
+# threshold. Otherwise show the explanatory "coming soon" notice from
+# gmed (same visual treatment as other insufficient-data callouts in this
+# report).
+#
+# The synthesis cache is populated by `data-refresh/refresh_feedback_data.R`
+# — run that before rendering to refresh against new comments.
+
+n_evals_for_synth <- assess_stats$individual_count
+if (is.null(n_evals_for_synth)) n_evals_for_synth <- 0L
+
+# here::here() anchors to project root, so the cache resolves correctly
+# whether quarto_render() was called with `execute_dir = project_root`
+# (as in render_all_reports.R) or without (as in send_faculty_reports.R,
+# which doesn't set execute_dir and so defaults the qmd's wd to reports/).
+synth_cache_path <- here::here("data", "synthesis_cache.rds")
+fac_keys         <- character(0)
+synth_cache      <- NULL
+
+if (file.exists(synth_cache_path)) {
+  synth_cache <- readRDS(synth_cache_path)
+  # Cache keys look like
+  #   "Paul Kunnath::synthesis_v3::claude-opus-4-6::AY2025-2026__2026-01-15"
+  # — anchor on the v3 prompt version so older v2 entries don't leak in,
+  # then pick the most-recent snapshot below. startsWith() avoids regex
+  # escaping for faculty names with dots / apostrophes / parentheses.
+  prefix   <- paste0(fac_name, "::synthesis_v3::")
+  fac_keys <- names(synth_cache)[startsWith(names(synth_cache), prefix)]
+}
+
+if (n_evals_for_synth < gmed::SYNTH_MIN_EVALUATIONS || length(fac_keys) == 0) {
+  gmed::emit_html_block(gmed::render_synthesis_insufficient_notice(
+    n_evaluations = n_evals_for_synth
+  ))
+} else {
+  # Pick the most-recent snapshot. The trailing component of the cache
+  # key is the corpus_tag — `AY2025-2026__YYYY-MM-DD`. Sort lexically on
+  # the date suffix; keys without a date suffix sort to the bottom
+  # (treated as "0000-00-00").
+  date_suffix <- vapply(fac_keys, function(k) {
+    parts     <- strsplit(k, "::", fixed = TRUE)[[1]]
+    last_part <- parts[length(parts)]
+    date_part <- sub(".*__", "", last_part)
+    if (grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", date_part)) date_part else "0000-00-00"
+  }, character(1))
+
+  # Tiebreak on key length so newer tagged-but-undated entries (legacy)
+  # rank above older untagged ones if both somehow appear in the cache.
+  latest_key <- fac_keys[order(date_suffix, nchar(fac_keys),
+                               decreasing = TRUE)[1]]
+  gmed::emit_html_block(gmed::render_synthesis_faculty_html(
+    synth_cache[[latest_key]]
+  ))
+}
+```
+
+---
+
+```{r footer}
+knitr::asis_output(sprintf(
+  '<hr style="margin-top:2rem;">
+   <p style="font-size:0.78rem;color:#888;text-align:center;">
+     IMSLU Internal Medicine Faculty Report &nbsp;|&nbsp; %s &nbsp;|&nbsp;
+     Questions? Contact the GME Office.
+   </p>',
+  format(Sys.Date(), "%B %d, %Y")
+))
+```

@@ -713,3 +713,63 @@ get_faculty_assessment_stats <- function(assessment_data, faculty_name, peer_fac
     total_faculty = nrow(all_counts)
   )
 }
+
+# ==============================================================================
+# Leader Dashboard Display Helpers
+# ==============================================================================
+
+#' Format primary domain comparison as a DT datatable for the leader dashboard
+#'
+#' @param comparison_df Output of create_comparison_table() |> add_domain_labels()
+#' @return DT::datatable object
+create_eval_comparison_table <- function(comparison_df) {
+  tbl <- comparison_df %>%
+    arrange(desc(individual_score)) %>%
+    transmute(
+      Domain      = domain_label,
+      Score       = round(individual_score, 2),
+      `Dept Avg`  = round(all_score, 2),
+      Difference  = round(difference, 2)
+    )
+
+  DT::datatable(
+    tbl,
+    options  = list(pageLength = 10, searching = FALSE, dom = "t", ordering = FALSE),
+    rownames = FALSE
+  ) %>%
+    DT::formatStyle(
+      "Difference",
+      color = DT::styleInterval(0, c("#d7191c", "#1a9641"))
+    )
+}
+
+#' Format secondary metrics comparison as a DT datatable for the leader dashboard
+#'
+#' @param scoped_metrics Output of calculate_secondary_metrics() for the current scope
+#' @param all_metrics    Output of calculate_secondary_metrics() for all faculty (baseline)
+#' @return DT::datatable object
+create_secondary_metrics_table <- function(scoped_metrics, all_metrics) {
+  tbl <- scoped_metrics %>%
+    left_join(
+      all_metrics %>% rename(all_mean = mean_value, all_n = n),
+      by = "metric"
+    ) %>%
+    mutate(
+      Metric     = sapply(metric, get_domain_label),
+      Score      = round(mean_value, 2),
+      N          = n,
+      `Dept Avg` = round(all_mean, 2),
+      Diff       = round(mean_value - all_mean, 2)
+    ) %>%
+    select(Metric, Score, N, `Dept Avg`, Diff)
+
+  DT::datatable(
+    tbl,
+    options  = list(pageLength = 10, searching = FALSE, dom = "t", ordering = FALSE),
+    rownames = FALSE
+  ) %>%
+    DT::formatStyle(
+      "Diff",
+      color = DT::styleInterval(0, c("#d7191c", "#1a9641"))
+    )
+}

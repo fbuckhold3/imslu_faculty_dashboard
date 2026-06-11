@@ -1,0 +1,597 @@
+---
+title: "Divisional Dashboard"
+subtitle: "Academic Year 2025–2026"
+params:
+  fac_div: 3
+  report_type: "division"   # "division" = faculty; "fellowship" = fellows
+  div_label: "Cardiology"
+  faculty_rds: ""           # path to pre-fetched faculty RDS (passed by send_faculty_reports.R)
+  rdm_rds: ""               # path to pre-fetched RDM RDS
+format:
+  html:
+    self-contained: true
+    theme: flatly
+    page-layout: full
+    toc: true
+    toc-location: left
+    toc-title: "Contents"
+    toc-depth: 2
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+#| include: false
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(DT)
+library(jsonlite)
+
+source(here::here("R/utils/data_processing.R"))
+source(here::here("R/utils/calculations.R"))
+source(here::here("R/utils/plot_functions.R"))
+
+# ── Load data ──────────────────────────────────────────────────────────────────
+# Prefer pre-fetched RDS (no API call in subprocess). Falls back to live/test.
+if (nchar(params$faculty_rds) > 0 && file.exists(params$faculty_rds)) {
+  faculty_data <- readRDS(params$faculty_rds)
+  rdm_data     <- readRDS(params$rdm_rds)
+} else if (Sys.getenv("PRODUCTION_MODE") == "TRUE") {
+  faculty_data <- download_faculty_data()
+  rdm_data     <- download_rdm_focused()
+} else {
+  td           <- load_test_data()
+  faculty_data <- td$faculty
+  rdm_data     <- td$rdm
+}
+
+# ── Resolve params ─────────────────────────────────────────────────────────────
+target_div  <- as.character(params$fac_div)
+report_type <- params$report_type
+div_label   <- params$div_label
+
+is_fellowship <- report_type == "fellowship"
+group_label   <- if (is_fellowship) "Fellows" else "Faculty"
+fell_code     <- if (is_fellowship) 2 else 1
+
+current_year <- get_current_academic_year()
+prior_parts  <- strsplit(current_year, "-")[[1]]
+prior_year   <- paste0(as.integer(prior_parts[1]) - 1, "-", as.integer(prior_parts[2]) - 1)
+
+# ── Filter to this division and group ─────────────────────────────────────────
+group_members <- faculty_data |>
+  filter(
+    as.character(fac_div) == target_div,
+    fac_fell == fell_code,
+    archived == 0 | is.na(archived)
+  ) |>
+  mutate(fac_name = clean_faculty_names(fac_name))
+
+if (nrow(group_members) == 0) {
+  stop(sprintf("No active %s found in division %s (%s).", group_label, target_div, div_label))
+}
+
+member_names <- group_members$fac_name
+
+# ── Domain label map ───────────────────────────────────────────────────────────
+DOMAIN_MAP <- c(
+  "approachability" = "Approachability",
+  "respect"         = "Respect",
+  "bedside_manner"  = "Bedside Manner",
+  "time_teaching"   = "Time for Teaching",
+  "ques_clin_des"   = "Clinical Reasoning",
+  "autonomy"        = "Autonomy",
+  "feedback"        = "Feedback",
+  "organ"           = "Organization"
+)
+
+# ── Eval data ─────────────────────────────────────────────────────────────────
+fac_eval <- rdm_data$faculty_evaluation |>
+  mutate(
+    fac_fell_name   = clean_faculty_names(fac_fell_name),
+    att_overall     = suppressWarnings(as.numeric(att_overall)),
+    approachability = suppressWarnings(as.numeric(approachability)),
+    respect         = suppressWarnings(as.numeric(respect)),
+    bedside_manner  = suppressWarnings(as.numeric(bedside_manner)),
+    time_teaching   = suppressWarnings(as.numeric(time_teaching)),
+    ques_clin_des   = suppressWarnings(as.numeric(ques_clin_des)),
+    autonomy        = suppressWarnings(as.numeric(autonomy)),
+    feedback        = suppressWarnings(as.numeric(feedback)),
+    organ           = suppressWarnings(as.numeric(organ))
+  )
+
+assessment <- rdm_data$assessment |>
+  mutate(ass_faculty = clean_faculty_names(ass_faculty))
+
+# Current-year evals for this division group
+group_evals_curr <- fac_eval |>
+  filter(fac_fell_name %in% member_names) |>
+  filter_by_academic_year(date_col = "fac_eval_date", year = current_year)
+
+# Current-year assessments for this division group
+group_assess_curr <- assessment |>
+  filter(ass_faculty %in% member_names) |>
+  filter_by_academic_year(date_col = "ass_date", year = current_year)
+
+n_group_evals  <- nrow(group_evals_curr)
+n_group_assess <- nrow(group_assess_curr)
+meets_threshold <- n_group_evals >= MIN_EVALUATIONS
+
+group_overall <- if (n_group_evals > 0) round(mean(group_evals_curr$att_overall, na.rm = TRUE), 2) else NA
+
+# ── Division-level domain means (used as comparison baseline in expandable rows)
+div_domain_means <- sapply(names(DOMAIN_MAP), function(d) {
+  if (d %in% names(group_evals_curr) && n_group_evals >= MIN_EVALUATIONS)
+    round(mean(group_evals_curr[[d]], na.rm = TRUE), 2)
+  else NA_real_
+})
+
+# ── Assessment by resident level ──────────────────────────────────────────────
+level_map <- c("1" = "Intern", "2" = "PGY-2", "3" = "PGY-3",
+               "4" = "Graduated", "5" = "Rotator")
+
+assess_by_level <- group_assess_curr |>
+  filter(!is.na(ass_level)) |>
+  mutate(level_label = level_map[as.character(ass_level)]) |>
+  count(level_label) |>
+  arrange(match(level_label, c("Intern", "PGY-2", "PGY-3", "Rotator", "Graduated")))
+
+# ── Dept comparison for the aggregate domain chart ────────────────────────────
+dept_evals_curr <- fac_eval |>
+  filter_by_academic_year(date_col = "fac_eval_date", year = current_year)
+
+group_means <- calculate_faculty_eval_means(group_evals_curr, domains = PRIMARY_EVAL_DOMAINS)
+dept_means  <- calculate_faculty_eval_means(dept_evals_curr,  domains = PRIMARY_EVAL_DOMAINS)
+comparison  <- create_comparison_table(group_means, dept_means) |> add_domain_labels()
+
+# ── Synthesis cache (Feedback on Your Feedback) ───────────────────────────────
+synth_cache_path <- here::here("data", "synthesis_cache.rds")
+synth_cache      <- if (file.exists(synth_cache_path)) readRDS(synth_cache_path) else NULL
+
+get_synthesis_html <- function(nm) {
+  if (is.null(synth_cache)) return(NULL)
+  prefix   <- paste0(nm, "::synthesis_v3::")
+  fac_keys <- names(synth_cache)[startsWith(names(synth_cache), prefix)]
+  if (length(fac_keys) == 0) return(NULL)
+
+  date_suffix <- vapply(fac_keys, function(k) {
+    parts     <- strsplit(k, "::", fixed = TRUE)[[1]]
+    last_part <- parts[length(parts)]
+    date_part <- sub(".*__", "", last_part)
+    if (grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", date_part)) date_part else "0000-00-00"
+  }, character(1))
+
+  latest_key <- fac_keys[order(date_suffix, nchar(fac_keys), decreasing = TRUE)[1]]
+
+  tryCatch({
+    h <- gmed::render_synthesis_faculty_html(synth_cache[[latest_key]])
+    s <- paste0(as.character(h), collapse = "")
+    jsonlite::unbox(s)
+  }, error = function(e) NULL)
+}
+
+# ── Per-member detail for expandable rows ─────────────────────────────────────
+member_details <- setNames(lapply(member_names, function(nm) {
+  ev  <- group_evals_curr |> filter(fac_fell_name == nm)
+  ass <- group_assess_curr |> filter(ass_faculty == nm)
+  n_ev <- nrow(ev)
+
+  domain_list <- if (n_ev >= MIN_EVALUATIONS) {
+    lapply(names(DOMAIN_MAP), function(d) list(
+      label = unname(DOMAIN_MAP[d]),
+      score = if (d %in% names(ev)) round(mean(ev[[d]], na.rm = TRUE), 2) else NA,
+      div   = unname(div_domain_means[d])
+    ))
+  } else list()
+
+  list(
+    n_evals        = n_ev,
+    avg_overall    = if (n_ev >= MIN_EVALUATIONS) round(mean(ev$att_overall, na.rm = TRUE), 2) else NA,
+    n_assess       = nrow(ass),
+    has_domains    = n_ev >= MIN_EVALUATIONS,
+    domains        = domain_list,
+    plus           = as.list(ev |> filter(!is.na(plus),  nchar(trimws(plus))  > 0) |> pull(plus)),
+    delta          = as.list(ev |> filter(!is.na(delta), nchar(trimws(delta)) > 0) |> pull(delta)),
+    synthesis_html = get_synthesis_html(nm)   # NULL if not cached
+  )
+}), member_names)
+
+# null = "null" so a missing synthesis serializes as JSON null (falsy in JS),
+# not {} (truthy) — {} made the Notes on Feedback section render "[object Object]"
+detail_json <- jsonlite::toJSON(member_details, auto_unbox = TRUE,
+                                na = "null", null = "null")
+
+# ── Member summary table data ─────────────────────────────────────────────────
+member_summary <- map_dfr(member_names, function(nm) {
+  ev  <- group_evals_curr |> filter(fac_fell_name == nm)
+  ass <- group_assess_curr |> filter(ass_faculty == nm)
+  tibble(
+    ` `                 = "▶",
+    Name                = nm,
+    `Evals Received`    = nrow(ev),
+    `Avg Overall`       = if (nrow(ev) >= MIN_EVALUATIONS)
+                            as.character(round(mean(ev$att_overall, na.rm = TRUE), 2))
+                          else paste0("< ", MIN_EVALUATIONS, " evals"),
+    `Assessments Given` = nrow(ass)
+  )
+}) |> arrange(desc(`Evals Received`))
+
+# ── Build DT callback JS ───────────────────────────────────────────────────────
+callback_js <- paste0(
+"var MIN_EVALS = ", MIN_EVALUATIONS, ";
+var detailData = ", detail_json, ";
+
+function escH(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function buildDetail(d) {
+  var avg = (d.avg_overall === null || d.avg_overall === undefined)
+    ? '&lt; ' + MIN_EVALS + ' evals'
+    : parseFloat(d.avg_overall).toFixed(2) + ' / 5';
+
+  var h = '<div class=\"dp-wrap\">';
+
+  // Stat boxes
+  h += '<div class=\"dp-stats\">'
+     + '<div class=\"dp-stat\"><div class=\"dp-val\">' + d.n_evals + '</div><div class=\"dp-lbl\">Evals Received</div></div>'
+     + '<div class=\"dp-stat\"><div class=\"dp-val\">' + avg + '</div><div class=\"dp-lbl\">Avg Overall</div></div>'
+     + '<div class=\"dp-stat\"><div class=\"dp-val\">' + d.n_assess + '</div><div class=\"dp-lbl\">Assessments Given</div></div>'
+     + '</div>';
+
+  // Domain scores
+  if (d.has_domains && d.domains && d.domains.length > 0) {
+    h += '<div class=\"dp-section\"><div class=\"dp-sec-hd\">Domain Scores vs Division Average</div>'
+       + '<table class=\"dp-dtbl\">';
+    d.domains.forEach(function(dm) {
+      if (dm.score === null || dm.score === undefined) return;
+      var pct  = Math.min(parseFloat(dm.score) / 5 * 100, 100).toFixed(1);
+      var dpct = (dm.div !== null && dm.div !== undefined)
+                  ? Math.min(parseFloat(dm.div) / 5 * 100, 100).toFixed(1) : null;
+      var diff = (dm.div !== null && dm.div !== undefined)
+                  ? parseFloat(dm.score) - parseFloat(dm.div) : null;
+      var diffStr = diff !== null ? ((diff >= 0 ? '+' : '') + diff.toFixed(2)) : '';
+      var diffCol = diff !== null ? (diff >= 0 ? '#2a9d49' : '#d73027') : '#888';
+      h += '<tr>'
+         + '<td class=\"dp-dl\">' + escH(dm.label) + '</td>'
+         + '<td class=\"dp-db\"><div class=\"dp-bg\">'
+         +   '<div class=\"dp-fill\" style=\"width:' + pct + '%\"></div>'
+         +   (dpct !== null ? '<div class=\"dp-dline\" style=\"left:' + dpct + '%\"></div>' : '')
+         + '</div></td>'
+         + '<td class=\"dp-ds\">' + parseFloat(dm.score).toFixed(2) + '</td>'
+         + '<td class=\"dp-dd\" style=\"color:' + diffCol + '\">' + diffStr + '</td>'
+         + '</tr>';
+    });
+    h += '</table>'
+       + '<div class=\"dp-lgd\"><span class=\"dp-lgd-bar\"></span>&nbsp;Score &nbsp;|&nbsp; '
+       + '<span class=\"dp-lgd-line\"></span>&nbsp;Div avg &nbsp;|&nbsp; Diff = vs div avg</div>'
+       + '</div>';
+  }
+
+  // Feedback
+  h += '<div class=\"dp-section dp-fb\">';
+  h += '<div class=\"dp-fbc dp-plus\"><div class=\"dp-sec-hd\">&#10003; Strengths</div>';
+  if (d.plus && d.plus.length > 0) {
+    d.plus.forEach(function(t) { h += '<div class=\"dp-q\">' + escH(t) + '</div>'; });
+  } else { h += '<em class=\"dp-none\">None recorded this year</em>'; }
+  h += '</div>';
+
+  h += '<div class=\"dp-fbc dp-delta\"><div class=\"dp-sec-hd\">&#9651; Growth Areas</div>';
+  if (d.delta && d.delta.length > 0) {
+    d.delta.forEach(function(t) { h += '<div class=\"dp-q\">' + escH(t) + '</div>'; });
+  } else { h += '<em class=\"dp-none\">None recorded this year</em>'; }
+  h += '</div>';
+  h += '</div>'; // dp-fb
+
+  // Feedback on Your Feedback synthesis (from AI analysis of free-text comments)
+  if (d.synthesis_html) {
+    h += '<div class=\"dp-section dp-synthesis\">'
+       + '<div class=\"dp-sec-hd\">Notes on Feedback</div>'
+       + '<div class=\"dp-synth-body\">' + d.synthesis_html + '</div>'
+       + '</div>';
+  }
+
+  h += '</div>'; // dp-wrap
+  return h;
+}
+
+table.on('click', 'tbody tr', function() {
+  var row = table.row(this);
+  if (!row.length) return;
+  var name = String(row.data()[1] || '').replace(/<[^>]*>/g,'').trim();
+  var d = detailData[name];
+
+  if (row.child.isShown()) {
+    row.child.hide();
+    $(this).find('td:first').text('\\u25b6');
+    $(this).removeClass('dp-open');
+  } else {
+    var content = d
+      ? buildDetail(d)
+      : '<em style=\"padding:1rem;display:block\">No data for ' + escH(name) + '</em>';
+    row.child('<td colspan=\"99\" style=\"padding:0;border-top:none\">' + content + '</td>').show();
+    $(this).find('td:first').text('\\u25bc');
+    $(this).addClass('dp-open');
+  }
+});
+")
+```
+
+```{=html}
+<style>
+/* ── Detail panel ─────────────────────────────────────────── */
+.dp-wrap { padding:1rem 1.25rem; background:#f8f9fa; border-bottom:2px solid #dee2e6; }
+
+.dp-stats { display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap; }
+.dp-stat  { background:white; border-radius:6px; padding:0.6rem 1rem;
+            border-left:3px solid #2c7bb6; min-width:130px; }
+.dp-val   { font-size:1.3rem; font-weight:700; color:#2c7bb6; }
+.dp-lbl   { font-size:0.75rem; color:#666; margin-top:0.1rem; }
+
+.dp-section   { margin-bottom:1rem; }
+.dp-sec-hd    { font-size:0.8rem; font-weight:600; color:#444; text-transform:uppercase;
+                letter-spacing:0.05em; margin-bottom:0.45rem;
+                border-bottom:1px solid #e0e0e0; padding-bottom:0.2rem; }
+
+.dp-dtbl  { width:100%; border-collapse:collapse; font-size:0.83rem; }
+.dp-dtbl tr:hover { background:#e8f0f8; }
+.dp-dl    { width:170px; padding:0.2rem 0.4rem; font-weight:500; }
+.dp-db    { padding:0.2rem 0.4rem; min-width:180px; }
+.dp-bg    { height:11px; background:#e0e0e0; border-radius:6px;
+            position:relative; overflow:visible; }
+.dp-fill  { height:100%; background:#2c7bb6; border-radius:6px;
+            position:absolute; top:0; left:0; }
+.dp-dline { position:absolute; width:2px; height:19px; top:-4px;
+            background:#e74c3c; border-radius:1px; }
+.dp-ds    { width:48px; padding:0.2rem 0.4rem; text-align:right; font-weight:600; }
+.dp-dd    { width:56px; padding:0.2rem 0.4rem; text-align:right; font-size:0.78rem; }
+
+.dp-lgd   { font-size:0.72rem; color:#888; margin-top:0.3rem; }
+.dp-lgd-bar  { display:inline-block; width:22px; height:9px; background:#2c7bb6;
+               border-radius:3px; vertical-align:middle; }
+.dp-lgd-line { display:inline-block; width:2px; height:13px; background:#e74c3c;
+               vertical-align:middle; }
+
+.dp-fb    { display:flex; gap:1rem; flex-wrap:wrap; }
+.dp-fbc   { flex:1; min-width:200px; }
+.dp-q     { font-size:0.82rem; color:#333; padding:0.3rem 0.5rem; margin-bottom:0.3rem;
+            border-left:3px solid #ccc; background:white; border-radius:0 4px 4px 0;
+            line-height:1.45; }
+.dp-plus  .dp-q   { border-left-color:#2a9d49; }
+.dp-delta .dp-q   { border-left-color:#e67e22; }
+.dp-none  { font-size:0.8rem; color:#aaa; font-style:italic; }
+
+/* Synthesis section */
+.dp-synthesis .dp-synth-body { font-size:0.84rem; line-height:1.5; }
+
+/* Row expand icon */
+tbody tr { cursor:pointer; }
+tbody tr.dp-open > td:first-child { color:#1a6496; font-weight:bold; }
+</style>
+```
+
+```{r header-html}
+report_title <- if (is_fellowship) {
+  paste0(div_label, " — Fellowship Summary")
+} else {
+  paste0(div_label, " — Division Summary")
+}
+
+knitr::asis_output(sprintf(
+  '<div style="background:#1a6496;color:white;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;">
+    <h2 style="margin:0;font-size:1.6rem;">%s</h2>
+    <p style="margin:0.35rem 0 0;opacity:0.85;font-size:0.95rem;">%s &nbsp;|&nbsp; %d %s &nbsp;|&nbsp; Report generated %s</p>
+  </div>',
+  report_title, current_year,
+  nrow(group_members), group_label,
+  format(Sys.Date(), "%B %d, %Y")
+))
+```
+
+---
+
+## Overview
+
+```{r summary-boxes}
+overall_label <- if (is.na(group_overall)) "—" else sprintf("%.2f / 5", group_overall)
+avg_assess    <- if (nrow(group_members) > 0) round(n_group_assess / nrow(group_members), 1) else 0
+
+boxes <- list(
+  list(val = as.character(nrow(group_members)), lbl = paste(group_label, "in Division"), sub = div_label,        col = "#2c7bb6"),
+  list(val = as.character(n_group_evals),       lbl = "Evaluations Received",            sub = current_year,    col = "#2c7bb6"),
+  list(val = overall_label,                     lbl = "Group Avg Overall",                sub = "out of 5.0",   col = "#2c7bb6"),
+  list(val = as.character(n_group_assess),      lbl = "Assessments Given",               sub = current_year,    col = "#2c7bb6")
+)
+
+box_html <- paste(sapply(boxes, function(b) sprintf(
+  '<div style="background:#f8f9fa;border-left:4px solid %s;border-radius:4px;padding:1rem 1.25rem;">
+    <div style="font-size:1.85rem;font-weight:700;color:%s;">%s</div>
+    <div style="font-size:0.88rem;font-weight:600;color:#333;margin-top:0.15rem;">%s</div>
+    <div style="font-size:0.76rem;color:#888;margin-top:0.1rem;">%s</div>
+  </div>', b$col, b$col, b$val, b$lbl, b$sub
+)), collapse = "\n")
+
+knitr::asis_output(sprintf(
+  '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem;">%s</div>',
+  box_html
+))
+```
+
+---
+
+## Teaching Activity
+
+```{r assess-summary-callout}
+avg_per_member <- if (nrow(group_members) > 0) round(n_group_assess / nrow(group_members), 1) else 0
+n_active_assessors <- length(unique(
+  group_assess_curr$ass_faculty[group_assess_curr$ass_faculty %in% member_names]
+))
+
+knitr::asis_output(sprintf(
+  '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1.25rem;">
+    <div style="background:#e8f4fd;border-radius:8px;padding:1rem 1.25rem;text-align:center;">
+      <div style="font-size:2.1rem;font-weight:800;color:#1a6496;">%d</div>
+      <div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">Total Assessments</div>
+      <div style="font-size:0.75rem;color:#666;margin-top:0.15rem;">%s</div>
+    </div>
+    <div style="background:#f5f5f5;border-radius:8px;padding:1rem 1.25rem;text-align:center;">
+      <div style="font-size:2.1rem;font-weight:800;color:#555;">%.1f</div>
+      <div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">Avg per %s</div>
+      <div style="font-size:0.75rem;color:#666;margin-top:0.15rem;">%s</div>
+    </div>
+    <div style="background:#fff8e1;border-radius:8px;padding:1rem 1.25rem;text-align:center;">
+      <div style="font-size:2.1rem;font-weight:800;color:#b7760a;">%d</div>
+      <div style="font-size:0.85rem;font-weight:600;color:#333;margin-top:0.2rem;">%s Assessed</div>
+      <div style="font-size:0.75rem;color:#666;margin-top:0.15rem;">at least once this year</div>
+    </div>
+  </div>',
+  n_group_assess, current_year,
+  avg_per_member, if (is_fellowship) "Fellow" else "Faculty Member", current_year,
+  n_active_assessors, if (is_fellowship) "Fellows" else "Faculty"
+))
+```
+
+```{r assess-by-level-chart}
+#| fig-height: 3
+#| fig-width: 6
+#| out-width: "100%"
+
+if (nrow(assess_by_level) > 0) {
+  lvl_order <- c("Intern", "PGY-2", "PGY-3", "Rotator", "Graduated")
+  assess_by_level |>
+    mutate(level_label = factor(level_label, levels = rev(lvl_order))) |>
+    ggplot(aes(x = n, y = level_label)) +
+    geom_col(fill = "#2c7bb6", width = 0.6) +
+    geom_text(aes(label = n), hjust = -0.3, size = 3.5, color = "#333") +
+    scale_x_continuous(expand = expansion(mult = c(0, 0.15))) +
+    labs(title = sprintf("Resident Assessments by Level — %s — %s", div_label, current_year),
+         x = "Number of Assessments", y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.y = element_blank(), panel.grid.minor = element_blank(),
+          plot.title = element_text(size = 12, face = "bold"))
+} else {
+  cat("*No assessment records found for this group in the current academic year.*")
+}
+```
+
+---
+
+## Resident Ratings
+
+```{r ratings-threshold-check}
+if (!meets_threshold) {
+  knitr::asis_output(sprintf(
+    '<div style="background:#fff8e1;border-left:4px solid #f0ad4e;border-radius:4px;
+                padding:0.85rem 1.1rem;margin-bottom:1rem;">
+      <strong>Insufficient Data</strong> — %d group evaluation%s received in %s.
+      A minimum of %d is required to display domain scores.
+    </div>',
+    n_group_evals, if (n_group_evals == 1) "" else "s", current_year, MIN_EVALUATIONS
+  ))
+}
+```
+
+```{r domain-chart}
+#| fig-height: 4.5
+#| fig-width: 7
+#| out-width: "100%"
+
+if (meets_threshold && nrow(comparison) > 0) {
+  df <- comparison |>
+    arrange(individual_score) |>
+    mutate(domain_label = factor(domain_label, levels = domain_label))
+
+  score_x <- 5.75
+
+  ggplot(df, aes(y = domain_label)) +
+    geom_segment(aes(x = 1, xend = 5.5, yend = domain_label),
+                 color = "#e8e8e8", linewidth = 0.4) +
+    geom_point(aes(x = all_score,        shape = "dept",  color = "dept"),  size = 4) +
+    geom_point(aes(x = individual_score, shape = "group", color = "group"), size = 5) +
+    geom_text(aes(x = score_x, label = sprintf("%.2f", individual_score)),
+              hjust = 1, size = 3.4, color = "#333333") +
+    scale_shape_manual(name = NULL,
+      values = c(group = 19, dept = 15),
+      labels = c(group = paste(div_label, group_label), dept = "Dept Avg")) +
+    scale_color_manual(name = NULL,
+      values = c(group = "#2c7bb6", dept = "#555555"),
+      labels = c(group = paste(div_label, group_label), dept = "Dept Avg")) +
+    scale_x_continuous(limits = c(1, score_x), breaks = 1:5,
+                       expand = expansion(mult = c(0, 0))) +
+    labs(title = sprintf("Domain Scores — %s %s vs Department — %s",
+                         div_label, group_label, current_year),
+         x = "Score (1 = low, 5 = high)", y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.major.y = element_blank(), panel.grid.minor = element_blank(),
+          legend.position = "bottom", legend.text = element_text(size = 10))
+}
+```
+
+```{r domain-table}
+if (meets_threshold && nrow(comparison) > 0) {
+  tbl <- comparison |>
+    arrange(desc(individual_score)) |>
+    transmute(
+      Domain         = domain_label,
+      `Group Score`  = round(individual_score, 2),
+      `Dept Avg`     = round(all_score, 2),
+      `Diff vs Dept` = round(difference, 2)
+    )
+
+  diff_colors <- if_else(comparison$difference >= 0, "#1a9641", "#d7191c", missing = "#555")
+
+  kable(tbl, align = c("l","c","c","c"),
+        caption = sprintf("Domain scores — %s %s — %s. Scale 1–5.",
+                          div_label, group_label, current_year)) |>
+    kable_styling(bootstrap_options = c("striped","hover","condensed"),
+                  full_width = TRUE, font_size = 13) |>
+    column_spec(4, color = diff_colors)
+}
+```
+
+::: {.callout-note appearance="simple"}
+**Scale:** 1 = Lowest, 5 = Highest. Group scores are the aggregate mean across all `r nrow(group_members)` `r tolower(group_label)` in `r div_label` for `r current_year`. Individual scores in the expandable rows are suppressed until ≥ `r MIN_EVALUATIONS` evaluations are received.
+:::
+
+---
+
+## Members
+
+*Click any row to expand individual details.*
+
+```{r member-table}
+datatable(
+  member_summary,
+  rownames  = FALSE,
+  escape    = FALSE,
+  selection = "none",
+  options   = list(
+    columnDefs = list(
+      list(orderable = FALSE, className = "dt-center", width = "30px", targets = 0)
+    ),
+    pageLength = 50,
+    dom        = "tip",
+    order      = list(list(2, "desc"))   # sort by Evals Received desc
+  ),
+  callback = DT::JS(callback_js)
+)
+```
+
+---
+
+```{r footer}
+knitr::asis_output(sprintf(
+  '<hr style="margin-top:2rem;">
+   <p style="font-size:0.78rem;color:#888;text-align:center;">
+     IMSLU Internal Medicine — %s %s Report &nbsp;|&nbsp; %s &nbsp;|&nbsp;
+     Questions? Contact the GME Office.
+   </p>',
+  div_label, if (is_fellowship) "Fellowship" else "Division",
+  format(Sys.Date(), "%B %d, %Y")
+))
+```
