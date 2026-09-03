@@ -169,8 +169,8 @@ get_synthesis_html <- function(nm) {
 
   tryCatch({
     # PD view shows only the PD coaching note — not the full faculty-facing
-    # synthesis (cards, themes, growth pointers). Requires gmed >= 0.2.5.
-    h <- gmed::render_synthesis_pd_note_html(synth_cache[[latest_key]])
+    # synthesis (cards, themes, growth pointers). Requires attendfeedback.
+    h <- attendfeedback::render_synthesis_pd_note_html(synth_cache[[latest_key]])
     if (is.null(h)) return(NULL)
     # unbox so toJSON emits a plain string (auto_unbox alone is not enough
     # for values built outside the list literal)

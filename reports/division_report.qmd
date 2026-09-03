@@ -168,7 +168,7 @@ get_synthesis_html <- function(nm) {
   latest_key <- fac_keys[order(date_suffix, nchar(fac_keys), decreasing = TRUE)[1]]
 
   tryCatch({
-    h <- gmed::render_synthesis_faculty_html(synth_cache[[latest_key]])
+    h <- attendfeedback::render_synthesis_faculty_html(synth_cache[[latest_key]])
     s <- paste0(as.character(h), collapse = "")
     jsonlite::unbox(s)
   }, error = function(e) NULL)

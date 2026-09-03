@@ -791,7 +791,7 @@ if (nrow(feedback_hist$delta) >= MIN_COMMENTS) {
 
 # Show synthesis if available and the faculty meets the minimum-evaluation
 # threshold. Otherwise show the explanatory "coming soon" notice from
-# gmed (same visual treatment as other insufficient-data callouts in this
+# attendfeedback (same visual treatment as other insufficient-data callouts in this
 # report).
 #
 # The synthesis cache is populated by `data-refresh/refresh_feedback_data.R`
@@ -819,8 +819,8 @@ if (file.exists(synth_cache_path)) {
   fac_keys <- names(synth_cache)[startsWith(names(synth_cache), prefix)]
 }
 
-if (n_evals_for_synth < gmed::SYNTH_MIN_EVALUATIONS || length(fac_keys) == 0) {
-  gmed::emit_html_block(gmed::render_synthesis_insufficient_notice(
+if (n_evals_for_synth < attendfeedback::SYNTH_MIN_EVALUATIONS || length(fac_keys) == 0) {
+  attendfeedback::emit_html_block(attendfeedback::render_synthesis_insufficient_notice(
     n_evaluations = n_evals_for_synth
   ))
 } else {
@@ -839,7 +839,7 @@ if (n_evals_for_synth < gmed::SYNTH_MIN_EVALUATIONS || length(fac_keys) == 0) {
   # rank above older untagged ones if both somehow appear in the cache.
   latest_key <- fac_keys[order(date_suffix, nchar(fac_keys),
                                decreasing = TRUE)[1]]
-  gmed::emit_html_block(gmed::render_synthesis_faculty_html(
+  attendfeedback::emit_html_block(attendfeedback::render_synthesis_faculty_html(
     synth_cache[[latest_key]]
   ))
 }
