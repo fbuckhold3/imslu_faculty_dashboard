@@ -6,6 +6,19 @@
 # who authored real feedback) with at least attendfeedback::SYNTH_MIN_EVALUATIONS
 # resident evaluations.
 #
+# 2026-09-08: rewritten to call attendfeedback::run_deidentification()
+# instead of a hand-rolled pull+deidentify dance. That one function now
+# handles what this script used to do by hand: pulling assessment data
+# with no premature date filter (see the 2026-09-02 incident this script
+# used to document at length), pulling a FRESH resident roster on every
+# run (so new residents are covered automatically, no code change
+# needed), nickname-variant expansion, and known pooled/rotator record_id
+# redaction — all on by default. Faculty cross-mention scanning is left
+# OFF here (`scan_faculty = FALSE`) since this corpus feeds faculty-facing
+# reports where real faculty names are meant to show — see
+# `attendfeedback/data-refresh` in the research-dataset script for where
+# that scan is actually used.
+#
 # WRITES:
 #   data/deid_<AY_TAG>.rds            — full deidentified corpus snapshot
 #                                       (overwritten on each refresh)
@@ -26,8 +39,8 @@
 # PRECONDITIONS:
 #   - ~/.Renviron defines RDM_TOKEN, FAC_TOKEN, REDCAP_URL,
 #     ANTHROPIC_API_KEY
-#   - attendfeedback installed (provides synthesis pipeline +
-#     SYNTH_MIN_EVALUATIONS + render helpers + robust archived filter)
+#   - attendfeedback installed (provides the de-id + synthesis pipeline,
+#     SYNTH_MIN_EVALUATIONS, and render helpers)
 
 suppressPackageStartupMessages({
   library(attendfeedback)
@@ -46,39 +59,29 @@ SYNTH_PATH    <- file.path(DATA_DIR, "synthesis_cache.rds")
 
 dir.create(DATA_DIR, showWarnings = FALSE, recursive = TRUE)
 
-# ── 1. Pull + deidentify ────────────────────────────────────────────────────
-#
-# IMPORTANT: do NOT pass date_from into pull_assessment_data() here. REDCap
-# only returns each resident's `name` field on their one-time BASE record row
-# (redcap_repeat_instrument is NA there) — `ass_date` lives on the repeating
-# "Assessment" instrument, so that base row always has ass_date = NA.
-# pull_assessment_data(date_from=...) filters client-side on ass_date and
-# drops NA rows, which deletes the only row carrying `name` — before
-# deidentify_comments() ever runs its forward-fill (group_by(record_id) |>
-# fill(name)). With nothing to fill from, BOTH the record-based and
-# roster-based de-id passes silently fail for that resident, corpus-wide.
-#
-# Confirmed 2026-09-02: this leaked the assessed resident's own name into
-# 243/1330 records (18%) of the AY2025-2026__2026-06-09 snapshot, and 13 of
-# the 33 already-produced faculty reports had a resident's real name visible
-# in the delivered synthesis text (reports already went out — Fred is aware
-# and accepted that; this fix is for future refreshes only).
-#
-# Fix: pull the full corpus with no date filter, deidentify it whole so every
-# base name-row survives for the forward-fill, THEN filter to the target
-# date range.
+# ── 1. Pull + deidentify ─────────────────────────────────────────────────────
+# Fresh resident roster, nickname expansion, and pooled-record redaction
+# are all handled internally — see run_deidentification()'s docs.
 
 message("== Refresh ", SNAPSHOT_TAG, " ==")
-message("Pulling full assessment corpus from REDCap (deidentifying before date-filtering)...")
 
-raw       <- attendfeedback::pull_assessment_data()
-deid_full <- attendfeedback::deidentify_comments(raw)
-deid      <- deid_full |>
-  dplyr::filter(!is.na(ass_date), as.Date(ass_date) >= as.Date(AY_START_DATE))
+deid_run <- run_deidentification(
+  scan_faculty = FALSE,   # faculty-facing reports show real faculty names
+                          # by design; the faculty cross-mention scan is
+                          # for the de-identified research export instead
+  date_from    = AY_START_DATE
+)
+
+deid <- deid_run$data
 saveRDS(deid, DEID_PATH)
 
-message(sprintf("  %d assessment records (%s onward) → %s",
+message(sprintf("  %d assessment records (%s onward) -> %s",
                 nrow(deid), AY_START_DATE, DEID_PATH))
+
+if (nrow(deid_run$report) > 0) {
+  message(sprintf("  %d row(s) flagged for review (resident-name gaps / pooled-record buckets) -- see deid_run$report",
+                  nrow(deid_run$report)))
+}
 
 # ── 2. Faculty roster (active + archived) ────────────────────────────────────
 # Include archived faculty — someone who has since left or changed roles
@@ -86,21 +89,8 @@ message(sprintf("  %d assessment records (%s onward) → %s",
 # denied synthesis to faculty who cleared the evaluation threshold purely
 # because of their current roster status (e.g. Kelvin Pollard, Hayden
 # Rotramel in the 2026-06-09 run — both archived, both with real corpora).
-# Pull the full roster instead of attendfeedback::pull_active_faculty()'s active-only
-# wrapper; still drop blank names to filter out incomplete roster rows.
 
-faculty_roster <- REDCapR::redcap_read(
-  redcap_uri   = Sys.getenv("REDCAP_URL"),
-  token        = Sys.getenv("FAC_TOKEN"),
-  fields       = "fac_name",
-  raw_or_label = "raw",
-  verbose      = FALSE
-)$data
-
-faculty <- faculty_roster |>
-  dplyr::filter(!is.na(fac_name), nchar(trimws(fac_name)) > 0) |>
-  dplyr::pull(fac_name) |>
-  unique()
+faculty <- pull_active_faculty(include_archived = TRUE)
 
 message(sprintf("  %d faculty in FAC_TOKEN roster (active + archived).", length(faculty)))
 
@@ -114,19 +104,19 @@ counts <- deid |>
   dplyr::count(ass_faculty, name = "n_evaluations")
 
 eligible <- counts |>
-  dplyr::filter(n_evaluations >= attendfeedback::SYNTH_MIN_EVALUATIONS) |>
+  dplyr::filter(n_evaluations >= SYNTH_MIN_EVALUATIONS) |>
   dplyr::pull(ass_faculty)
 
 # Faculty in roster but below threshold (under-evaluating)
 below_threshold <- counts |>
-  dplyr::filter(n_evaluations < attendfeedback::SYNTH_MIN_EVALUATIONS) |>
+  dplyr::filter(n_evaluations < SYNTH_MIN_EVALUATIONS) |>
   dplyr::arrange(n_evaluations)
 
 # Faculty in roster with zero records in the deid corpus
 no_records <- setdiff(faculty, counts$ass_faculty)
 
-message(sprintf("  %d eligible faculty (≥ %d evaluations).",
-                length(eligible), attendfeedback::SYNTH_MIN_EVALUATIONS))
+message(sprintf("  %d eligible faculty (>= %d evaluations).",
+                length(eligible), SYNTH_MIN_EVALUATIONS))
 message(sprintf("  %d below threshold; %d with no evaluations this period.",
                 nrow(below_threshold), length(no_records)))
 
@@ -145,7 +135,7 @@ message(sprintf("\nSynthesizing %d faculty. ETA ~%.0f min at ~30s/call.",
 message(sprintf("Cache: %s", SYNTH_PATH))
 message(sprintf("Snapshot tag: %s\n", SNAPSHOT_TAG))
 
-results <- attendfeedback::synthesize_faculty_batch(
+results <- synthesize_faculty_batch(
   faculty_names = eligible,
   deid_data     = deid,
   cache_path    = SYNTH_PATH,
