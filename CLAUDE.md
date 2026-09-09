@@ -6,13 +6,25 @@ Each faculty member logs in with a unique access code and sees only their
 own data; division admins and department leaders get scoped aggregate views.
 
 **Repository:** https://github.com/fbuckhold3/imslu_faculty_dashboard
-**Deploys to:** Posit Connect Cloud (manifest.json in repo, auto-deploys on push to main)
+**Not deployed.** `manifest.json` and `renv.lock` are vestigial — nothing on
+Posit Connect reads them. Pushing to `main` is a plain push, no auto-deploy.
 
-## Current state (June 2026)
+## Current state (corrected 2026-09-09)
 
-In a 7-day push to full department rollout (~179 active faculty). Project plan,
-data-dictionary design, visualization inventory, and decision log live in the
-Cowork sub-project:
+The interactive Shiny app (`app.R` / `global.R` / `R/modules/`) below is no
+longer how this project is actually used — Fred no longer uses the online
+dashboard. **Current real workflow:** `data-refresh/refresh_feedback_data.R`
+pulls + de-identifies + synthesizes feedback (via the `attendfeedback`
+package), `reports/*.qmd` render per-faculty/division/PD HTML reports from
+that data, and those reports go out by email via Power Automate (see
+`reports/render_all_reports.R` and the `pa_manifest_*.csv` it writes). See
+[[project_attendfeedback_pipeline]] in memory for the pipeline's current
+state. The Shiny app's architecture is documented below as-is in case it's
+ever revived, but treat it as dormant, not the active path.
+
+Project plan, data-dictionary design, visualization inventory, and decision
+log from the original interactive-dashboard effort live in the Cowork
+sub-project (also likely stale relative to the above):
 
 ```
 ~/Library/Cowork/faculty-dashboard-v1-launch/
@@ -317,10 +329,13 @@ In code, always `Sys.getenv("VAR_NAME")` — never hardcoded values.
 
 ## Deployment
 
-- Push to `main` → Posit Connect Cloud auto-deploys via the connected GitHub repo
-- `manifest.json` must be current (run `rsconnect::writeManifest()` after dependency changes)
-- Required Connect env vars: `PRODUCTION_MODE`, `FAC_TOKEN`, `RDM_TOKEN`, `REDCAP_URL`
-- Connect uses its own R + package versions per manifest; `renv` is local-only
+Not deployed (corrected 2026-09-09 — this section previously described a
+live Posit Connect Cloud deployment that no longer exists). `manifest.json`
+and `renv.lock` are leftover from when it was, both stale (neither lists
+`gmed` or `attendfeedback`), and safe to ignore or clean up — nothing reads
+them. Reports are produced and distributed by running
+`data-refresh/refresh_feedback_data.R` then `reports/render_all_reports.R`
+by hand (or via a scheduled local job), not via a Connect redeploy.
 
 ## Quick reference
 
@@ -348,10 +363,16 @@ assign_academic_year("2025-01-06")  # → "2024-2025"
 - Similar viz patterns: `gmed/` and the sibling apps (`imslu.ind.dash`, `imslu.coach.dash`, `imslu.ccc.dashboard`)
 - Diagnostic scripts: `testing/` folder
 
-## gmed dependency status
+## gmed / attendfeedback dependency status
 
-This app does NOT currently depend on the `gmed` package — it rolled its own
-data processing, calculations, and plotting helpers. Phase 2 will migrate the
-obvious shared bits (`assign_academic_year`, `get_current_academic_year`,
-division-label lookup) into `gmed` for reuse across the sibling apps. See
-`~/Library/Cowork/faculty-dashboard-v1-launch/decisions.md` D2 for rationale.
+The Shiny app itself (`app.R`/`global.R`/`R/modules/`) does NOT depend on
+`gmed` or `attendfeedback` — it rolled its own data processing,
+calculations, and plotting helpers. The "Phase 2 migrate shared bits into
+gmed" plan below refers to that dormant app and hasn't happened.
+
+The actual active workflow (`data-refresh/refresh_feedback_data.R`,
+`data-refresh/build_research_dataset.R`, and the `.qmd` reports) DOES
+depend on `attendfeedback` (not `gmed` — that pipeline was extracted to its
+own package 2026-09; see [[project_attendfeedback_pipeline]]). Install it
+with `remotes::install_github("fbuckhold3/attendfeedback")` before running
+those scripts.
