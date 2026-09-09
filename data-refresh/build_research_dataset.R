@@ -26,6 +26,14 @@
 #     records) — attendfeedback::run_deidentification() with
 #     scan_faculty = TRUE also runs the faculty cross-mention scan on the
 #     INPUT comments in the same call.
+#   - Faculty crosswalk substitution + the adversarial free-text sweep
+#     (nicknames, "Dr. Lastname", full-name cross-mentions) in one call —
+#     attendfeedback::deidentify_faculty(), added 2026-09-09 (see
+#     fof_research/ROADMAP.md's "42 leaks" incident note for why the
+#     sweep matters: a name-column-only substitution would have missed
+#     all of them).
+#   - Independent verification (deliberately NOT the same matching code
+#     as the redaction) — attendfeedback::verify_faculty_deidentified().
 #   - Leaks in the DELIVERED synthesis narrative text (the "Nathan"
 #     class of gap — de-identified input, but the model's OUTPUT still
 #     said the name) — attendfeedback::scan_synthesis_for_leaks(), run
@@ -104,17 +112,36 @@ message(sprintf("  Crosswalk: %s (%d faculty total, IDs %s .. %s)",
                 CROSSWALK_PATH, nrow(crosswalk), min(crosswalk$study_id), max(crosswalk$study_id)))
 
 # ── 3. De-identified assessment-corpus analysis dataset ─────────────────────
+# deidentify_faculty() does the crosswalk substitution AND the adversarial
+# free-text sweep (full name / nickname / "Dr. Lastname") on the comment
+# columns in one call -- this is the step that actually caught the 42
+# leaks in the original ad hoc sweep, now built into the function instead
+# of requiring three separate scripts run in the right order by hand.
 
-deid_analysis <- apply_faculty_crosswalk(
+deid_analysis <- deidentify_faculty(
   deid, crosswalk,
   name_col  = "ass_faculty",
   id_col    = "faculty_id",
+  text_cols = c("ass_plus_clean", "ass_delta_clean"),
   drop_cols = "ass_specialty"
 )
 
 saveRDS(deid_analysis, DEID_ANALYSIS_PATH)
 message(sprintf("  Analysis dataset: %s (%d records, %d faculty, no ass_specialty column)",
                 DEID_ANALYSIS_PATH, nrow(deid_analysis), dplyr::n_distinct(deid_analysis$faculty_id)))
+
+# Independent verification -- deliberately NOT the same matching code as
+# deidentify_faculty()'s redaction (see verify_faculty_deidentified()'s
+# docs for why that matters).
+verify_hits <- verify_faculty_deidentified(
+  deid_analysis, faculty_names = all_faculty,
+  text_cols = c("ass_plus_clean", "ass_delta_clean")
+)
+message(sprintf("  Independent verification: %d hit(s) on the assessment corpus.", nrow(verify_hits)))
+if (nrow(verify_hits) > 0) {
+  message("  Review each hit (this is a genuinely separate check from the redaction above):")
+  print(verify_hits, n = Inf)
+}
 
 # ── 4. De-identify the synthesis snapshot ───────────────────────────────────
 
@@ -170,4 +197,5 @@ message(sprintf("  Crosswalk:            %s (%d faculty)", CROSSWALK_PATH, nrow(
 message(sprintf("  Assessment analysis:  %s (%d records)", DEID_ANALYSIS_PATH, nrow(deid_analysis)))
 message(sprintf("  Synthesis de-id:      %s (%d faculty)", SYNTH_DEID_PATH, length(synth_deid)))
 message(sprintf("  Input re-scan flags:  %d", nrow(deid_run$report)))
+message(sprintf("  Independent verify:   %d", nrow(verify_hits)))
 message(sprintf("  Narrative leak hits:  %d", nrow(leak_report)))
