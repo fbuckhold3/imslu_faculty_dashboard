@@ -13,14 +13,27 @@ Posit Connect reads them. Pushing to `main` is a plain push, no auto-deploy.
 
 The interactive Shiny app (`app.R` / `global.R` / `R/modules/`) below is no
 longer how this project is actually used — Fred no longer uses the online
-dashboard. **Current real workflow:** `data-refresh/refresh_feedback_data.R`
-pulls + de-identifies + synthesizes feedback (via the `attendfeedback`
-package), `reports/*.qmd` render per-faculty/division/PD HTML reports from
-that data, and those reports go out by email via Power Automate (see
-`reports/render_all_reports.R` and the `pa_manifest_*.csv` it writes). See
-[[project_attendfeedback_pipeline]] in memory for the pipeline's current
-state. The Shiny app's architecture is documented below as-is in case it's
-ever revived, but treat it as dormant, not the active path.
+dashboard. **Current real workflow, three manual steps:**
+
+1. `data-refresh/refresh_feedback_data.R` pulls + de-identifies + synthesizes
+   feedback (via the `attendfeedback` package) → writes `data/synthesis_cache.rds`.
+2. `reports/send_faculty_reports.R` (not `render_all_reports.R` — that's an
+   earlier, now-unused draft) pulls faculty roster + quantitative survey
+   data fresh, renders individual/division/fellowship/leadership reports
+   from `reports/*.qmd` (the AI narrative section inside `faculty_report.qmd`
+   reads `data/synthesis_cache.rds` directly — step 1 must have run
+   recently enough for that section to be current), and writes everything
+   plus `manifest.csv`/`manifest.xlsx` to `OUTPUT_BASE` (an `.Renviron`
+   override, `/Users/home_base/Developer/outputs` by default — a local
+   folder, not itself synced to anything).
+3. Fred manually uploads that run folder to OneDrive, then triggers the
+   Power Automate flow, which reads `manifest.xlsx` and emails each report
+   to the right person. The leadership/PD report is deliberately excluded
+   from the manifest — that one Fred sends himself.
+
+See [[project_attendfeedback_pipeline]] in memory for the pipeline's
+current state. The Shiny app's architecture is documented below as-is in
+case it's ever revived, but treat it as dormant, not the active path.
 
 Project plan, data-dictionary design, visualization inventory, and decision
 log from the original interactive-dashboard effort live in the Cowork
@@ -333,9 +346,10 @@ Not deployed (corrected 2026-09-09 — this section previously described a
 live Posit Connect Cloud deployment that no longer exists). `manifest.json`
 and `renv.lock` are leftover from when it was, both stale (neither lists
 `gmed` or `attendfeedback`), and safe to ignore or clean up — nothing reads
-them. Reports are produced and distributed by running
-`data-refresh/refresh_feedback_data.R` then `reports/render_all_reports.R`
-by hand (or via a scheduled local job), not via a Connect redeploy.
+them. Reports are produced and distributed by hand — see "Current state"
+above for the actual three-step workflow
+(`refresh_feedback_data.R` → `send_faculty_reports.R` → manual OneDrive
+upload + Power Automate trigger) — not via a Connect redeploy.
 
 ## Quick reference
 

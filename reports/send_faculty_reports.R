@@ -19,7 +19,11 @@
 #   FAC_TOKEN, RDM_TOKEN, REDCAP_URL
 #
 # Optional .Renviron var:
-#   OUTPUT_BASE   Full path to OneDrive sync folder (defaults to ~/Desktop/FacultyReports)
+#   OUTPUT_BASE   Local folder to write output to (defaults to
+#                 /Users/home_base/Developer/outputs). NOT itself a synced
+#                 OneDrive folder unless you point it at one -- the final
+#                 message this script prints tells you to upload the run
+#                 folder to OneDrive by hand before triggering Power Automate.
 
 # ── Load .Renviron (needed when run via cron — not loaded automatically) ──────
 if (file.exists("~/.Renviron")) readRenviron("~/.Renviron")
@@ -36,9 +40,11 @@ source("R/utils/data_processing.R")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-# Where to write output (set OUTPUT_BASE in .Renviron to your OneDrive sync path)
-# Default: e.g. "~/Library/CloudStorage/OneDrive-SaintLouisUniversity/Faculty Reports/pending"
-OUTPUT_BASE <- "/Users/home_base/Developer/outputs"
+# Where to write output (set OUTPUT_BASE in .Renviron to your OneDrive sync path).
+# Was hardcoded here until 2026-09-09 -- the .Renviron override documented
+# above never actually did anything. Now reads it properly; default matches
+# the path this has actually been run with in practice.
+OUTPUT_BASE <- Sys.getenv("OUTPUT_BASE", unset = "/Users/home_base/Developer/outputs")
 
 # Project root — passed to quarto as execute_dir so source("R/utils/...") works
 PROJECT_ROOT <- getwd()
